@@ -28,15 +28,15 @@ export function Features() {
         ))}
       </div>
 
-      <div className="interactive-glow mt-8 overflow-hidden rounded-2xl border border-icl-border bg-icl-card p-8 shadow-card">
-        <h3 className="mb-5 font-display text-lg font-semibold text-icl-text">
+      <div className="interactive-glow mt-8 overflow-hidden rounded-2xl border border-icl-border bg-icl-card p-5 shadow-card sm:p-8">
+        <h3 className="mb-4 font-display text-lg font-semibold text-icl-text sm:mb-5">
           Чем iCL не является
         </h3>
         <ul className="grid gap-3 sm:grid-cols-3">
           {notIcl.map((item) => (
             <li
               key={item}
-              className="interactive-glow flex items-start gap-3 rounded-xl border border-icl-border bg-icl-surface-alt px-4 py-3 text-sm text-icl-muted hover:-translate-y-0.5"
+              className="interactive-glow flex items-start gap-3 rounded-xl border border-icl-border bg-icl-surface-alt px-3 py-3 text-sm text-icl-muted hover:-translate-y-0.5 sm:px-4"
             >
               <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/10 text-xs text-red-400">
                 ×

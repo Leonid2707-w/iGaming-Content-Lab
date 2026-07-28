@@ -47,7 +47,7 @@
   }
 
   body {
-    @apply bg-icl-bg font-sans text-icl-text antialiased transition-colors duration-300;
+    @apply overflow-x-hidden bg-icl-bg font-sans text-icl-text antialiased transition-colors duration-300;
   }
 
   h1,
@@ -60,11 +60,28 @@
   ::selection {
     @apply bg-icl-accent/20 text-icl-text;
   }
+
+  /* Comfortable tap targets on phones */
+  @media (max-width: 639px) {
+    button,
+    a,
+    [role='button'] {
+      -webkit-tap-highlight-color: transparent;
+    }
+  }
 }
 
 @layer components {
   .container-icl {
     @apply mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .safe-pb {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  .safe-pt {
+    padding-top: max(0px, env(safe-area-inset-top));
   }
 
   .bg-grid-pattern {

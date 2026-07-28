@@ -39,7 +39,7 @@ function loadServices(): StandardService[] {
     return defaults.map((fallback) => {
       const saved = parsed.find((item) => item.id === fallback.id)
       if (!saved) return fallback
-      return {
+      const merged: StandardService = {
         ...fallback,
         ...saved,
         features: Array.isArray(saved.features) ? saved.features : fallback.features,
@@ -47,6 +47,15 @@ function loadServices(): StandardService[] {
         category: fallback.category,
         icon: saved.icon || fallback.icon,
       }
+
+      // Keep quantity bounds in sync with product defaults for slider-based services.
+      if (fallback.id === 'telegram-post' || fallback.id === 'youtube-video') {
+        merged.minimum = fallback.minimum
+        merged.maximum = fallback.maximum
+        merged.step = fallback.step
+      }
+
+      return merged
     })
   } catch {
     return defaults

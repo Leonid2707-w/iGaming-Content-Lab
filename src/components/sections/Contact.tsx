@@ -5,14 +5,9 @@ import { useOrderModal } from '@/context/OrderModalContext'
 
 const contacts = [
   {
-    label: 'Email',
-    value: siteConfig.contactEmail,
-    href: `mailto:${siteConfig.contactEmail}`,
-  },
-  {
-    label: 'Telegram',
+    label: 'Поддержка',
     value: siteConfig.contactTelegram,
-    href: `https://t.me/${siteConfig.contactTelegram.replace('@', '')}`,
+    href: siteConfig.supportTelegramUrl,
     external: true,
   },
   {
@@ -27,7 +22,7 @@ export function Contact() {
 
   return (
     <Section id="contact" eyebrow="Контакты" title="Связаться с iCL" className="section-muted">
-      <div className="grid gap-5 sm:grid-cols-3">
+      <div className="grid gap-5 sm:grid-cols-2">
         {contacts.map((item) => (
           <Card key={item.label} hover className="text-center sm:text-left">
             <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-icl-subtle">

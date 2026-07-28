@@ -55,7 +55,7 @@ function ServiceCard({ service, index }: { service: StandardService; index: numb
 
   return (
     <motion.article
-      className="card-premium group relative z-0 flex h-full flex-col overflow-visible p-6 hover:z-20"
+      className="card-premium group relative z-0 flex h-full flex-col overflow-visible p-5 sm:p-6 hover:z-20"
       variants={fadeUp}
       transition={{
         duration: duration.base,

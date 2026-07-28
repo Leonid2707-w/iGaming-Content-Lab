@@ -89,7 +89,7 @@ export function HeroVisual() {
   }
 
   return (
-    <div className="relative mx-auto min-h-[300px] w-full max-w-xl sm:min-h-[400px] lg:min-h-[470px]">
+    <div className="relative mx-auto min-h-[260px] w-full max-w-xl sm:min-h-[400px] lg:min-h-[470px]">
       <div
         className="hero-slot-halo pointer-events-none absolute left-1/2 top-1/2 h-[62%] w-[62%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500/15 blur-3xl"
         aria-hidden="true"
@@ -103,8 +103,8 @@ export function HeroVisual() {
         aria-hidden="true"
       />
 
-      <div className="absolute inset-0 flex items-center justify-center px-10 sm:px-14">
-        <div className="hero-slot-machine relative z-10 w-[82%] max-w-[430px]">
+      <div className="absolute inset-0 flex items-center justify-center px-6 sm:px-14">
+        <div className="hero-slot-machine relative z-10 w-[88%] max-w-[430px] sm:w-[82%]">
           <motion.button
             type="button"
             animate={controls}

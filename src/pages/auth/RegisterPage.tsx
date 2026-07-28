@@ -94,6 +94,7 @@ export function RegisterPage() {
     <AuthShell
       title="Регистрация"
       subtitle="Создайте аккаунт, чтобы оформлять заказы и видеть их историю в личном кабинете."
+      showBack
       footer={
         <p>
           Уже есть аккаунт?{' '}

@@ -24,7 +24,7 @@ export function Section({
   revealContent = true,
 }: SectionProps) {
   return (
-    <section id={id} className={`relative py-24 lg:py-28 ${className}`}>
+    <section id={id} className={`relative py-14 sm:py-20 lg:py-28 ${className}`}>
       <div className="container-icl">
         {title && (
           <ScrollReveal>

@@ -64,12 +64,6 @@ export function PartnerProgram() {
             <Button href={partnerHref} className="w-full" target="_blank" rel="noreferrer">
               Написать в Telegram {siteConfig.contactTelegram}
             </Button>
-            <p className="mt-4 text-center text-xs text-icl-subtle">
-              Или на почту{' '}
-              <a href={`mailto:${siteConfig.contactEmail}`} className="text-icl-accent hover:underline">
-                {siteConfig.contactEmail}
-              </a>
-            </p>
           </Card>
         </div>
       </div>

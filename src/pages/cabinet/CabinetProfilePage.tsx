@@ -56,19 +56,6 @@ export function CabinetProfilePage() {
         onSubmit={onSubmit}
         className="space-y-4 rounded-2xl border border-icl-border bg-icl-card p-5 sm:p-6"
       >
-        <FormField
-          label="Email"
-          htmlFor="profile-email"
-          hint="Смена email пока недоступна в кабинете — напишите в поддержку, если нужно изменить почту."
-        >
-          <input
-            id="profile-email"
-            className={inputClass}
-            value={profile?.email || user?.email || ''}
-            disabled
-          />
-        </FormField>
-
         <FormField label="Имя" htmlFor="profile-name" required>
           <input
             id="profile-name"

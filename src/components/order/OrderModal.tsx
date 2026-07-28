@@ -30,6 +30,7 @@ import {
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
+import { EditableQuantity } from '@/components/ui/EditableQuantity'
 import { FormField, inputClass } from '@/components/ui/FormField'
 import { submitOrderRequest } from '@/api/orders'
 import {
@@ -96,7 +97,7 @@ const choices = [
   },
 ] as const
 
-const quantityServices = new Set(['telegram-post'])
+const quantityServices = new Set(['telegram-post', 'youtube-video'])
 const SOCIAL_ORDER_ID = 'social-management'
 const VIDEO_ORDER_ID = 'video-creative'
 const WEEKLY_MIN = 3
@@ -223,12 +224,12 @@ export function OrderModal() {
   const [telegram, setTelegram] = useState('')
   const [description, setDescription] = useState('')
   const [references, setReferences] = useState('')
+  const [styleText, setStyleText] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [links, setLinks] = useState<string[]>([])
   const [linkDraft, setLinkDraft] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [submitWarning, setSubmitWarning] = useState('')
   const [submittedPublicId, setSubmittedPublicId] = useState('')
 
   const isSocial = selectedId === SOCIAL_ORDER_ID
@@ -316,12 +317,12 @@ export function OrderModal() {
         : ''),
     )
     setReferences('')
+    setStyleText('')
     setFiles([])
     setLinks([])
     setLinkDraft('')
     setError('')
     setSubmitting(false)
-    setSubmitWarning('')
     setSubmittedPublicId('')
 
     previousFocus.current = document.activeElement as HTMLElement
@@ -500,7 +501,7 @@ export function OrderModal() {
     let quantityLabel: string | undefined
     if (showQuantity || isVideoOrder) quantityLabel = `${quantity} шт.`
     if (isSocial && platform === 'telegram' && weeklyMode === 'fixed') {
-      quantityLabel = `${weeklyCount} креативов / неделю`
+      quantityLabel = `${weeklyCount} постов / неделю`
     }
     if (isSocial && platform === 'telegram' && weeklyMode === 'custom') {
       quantityLabel = 'Кастомный объём'
@@ -552,7 +553,13 @@ export function OrderModal() {
     if (orderTotal !== undefined) formData.set('price', String(orderTotal))
     if (priceLabel) formData.set('priceLabel', priceLabel)
     formData.set('description', description.trim())
-    formData.set('referencesText', references.trim())
+    const referencesCombined = [
+      references.trim() ? `Примеры и референсы:\n${references.trim()}` : '',
+      styleText.trim() ? `Стиль:\n${styleText.trim()}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+    formData.set('referencesText', referencesCombined)
     // Include unsubmitted draft link so it is not lost if user forgot "Добавить"
     const linksToSend = [...links]
     const draftNormalized = normalizeClientLink(linkDraft)
@@ -582,7 +589,6 @@ export function OrderModal() {
 
     setSubmitting(true)
     setError('')
-    setSubmitWarning('')
     try {
       const result = await submitOrderRequest(formData, accessToken)
       if (!result.ok) {
@@ -590,7 +596,6 @@ export function OrderModal() {
         return
       }
       setSubmittedPublicId(result.order?.publicId || '')
-      setSubmitWarning(result.warning || '')
       setStep('success')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось отправить заявку')
@@ -626,7 +631,7 @@ export function OrderModal() {
     return (
       <>
         <FormField
-          label="Стиль и описание"
+          label="Примеры и референсы"
           htmlFor="order-references"
           hint={requiredHint}
         >
@@ -636,7 +641,18 @@ export function OrderModal() {
             value={references}
             onChange={(event) => setReferences(event.target.value)}
             className={inputClass}
-            placeholder="Опишите стиль, тон или формат вашего креатива"
+            placeholder="Ссылки или описание примеров, на которые ориентироваться"
+          />
+        </FormField>
+
+        <FormField label="Стиль" htmlFor="order-style">
+          <textarea
+            id="order-style"
+            rows={3}
+            value={styleText}
+            onChange={(event) => setStyleText(event.target.value)}
+            className={inputClass}
+            placeholder="Тон, визуальный стиль, формат подачи"
           />
         </FormField>
 
@@ -795,7 +811,7 @@ export function OrderModal() {
               motionOff ? { duration: 0 } : { duration: duration.slow, ease: easeOutSoft }
             }
           >
-            <header className="flex items-center justify-between border-b border-icl-border px-5 py-4 sm:px-8">
+            <header className="flex items-center justify-between border-b border-icl-border px-4 py-3 sm:px-8 sm:py-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-icl-accent">
                   Заказ контента
@@ -838,7 +854,7 @@ export function OrderModal() {
               </div>
             </div>
 
-            <div className="overflow-y-auto px-5 py-6 sm:px-8 sm:py-8">
+            <div className="overflow-y-auto overscroll-contain px-4 py-5 sm:px-8 sm:py-8">
               {authLoading ? (
                 <p className="py-8 text-center text-sm text-icl-muted">Проверяем авторизацию…</p>
               ) : !isAuthenticated ? (
@@ -992,9 +1008,18 @@ export function OrderModal() {
                                     </p>
                                   </div>
                                   <div className="text-right">
-                                    <p className="font-display text-xl font-semibold text-icl-accent">
-                                      {quantity} шт.
-                                    </p>
+                                    <EditableQuantity
+                                      value={quantity}
+                                      min={videoSettings.minimum}
+                                      max={videoSettings.maximum}
+                                      step={videoSettings.step}
+                                      normalize={(next) =>
+                                        snapVideoQuantity(next, videoSettings)
+                                      }
+                                      onChange={setQuantity}
+                                      suffix="шт."
+                                      ariaLabel="Количество видеокреативов"
+                                    />
                                     {videoPackTotal !== undefined && (
                                       <p className="mt-1 text-sm text-icl-muted">
                                         {formatMoney(videoPackTotal)}$
@@ -1085,7 +1110,7 @@ export function OrderModal() {
                               className="rounded-2xl border border-icl-border bg-icl-card p-5"
                             >
                               <p className="mb-4 text-sm font-medium text-icl-text">
-                                Сколько креативов в неделю выставлять
+                                Количество постов в неделю
                               </p>
                               <div className="mb-5 flex flex-wrap gap-3">
                                 {[
@@ -1109,9 +1134,16 @@ export function OrderModal() {
                               </div>
                               {weeklyMode === 'fixed' ? (
                                 <>
-                                  <p className="mb-4 font-display text-xl font-semibold text-icl-accent">
-                                    {weeklyCount} креативов / неделю
-                                  </p>
+                                  <EditableQuantity
+                                    value={weeklyCount}
+                                    min={WEEKLY_MIN}
+                                    max={WEEKLY_MAX}
+                                    step={1}
+                                    onChange={setWeeklyCount}
+                                    suffix="постов / неделю"
+                                    ariaLabel="Количество постов в неделю"
+                                    className="mb-4"
+                                  />
                                   <input
                                     type="range"
                                     min={WEEKLY_MIN}
@@ -1120,7 +1152,7 @@ export function OrderModal() {
                                     value={weeklyCount}
                                     onChange={(event) => setWeeklyCount(Number(event.target.value))}
                                     className="range-input"
-                                    aria-label="Количество креативов в неделю"
+                                    aria-label="Количество постов в неделю"
                                   />
                                   <div className="mt-2 flex justify-between text-xs text-icl-subtle">
                                     <span>{WEEKLY_MIN}</span>
@@ -1221,9 +1253,15 @@ export function OrderModal() {
                                       </p>
                                     </div>
                                     <div className="text-right">
-                                      <p className="font-display text-xl font-semibold text-icl-accent">
-                                        {perDay} / день
-                                      </p>
+                                      <EditableQuantity
+                                        value={perDay}
+                                        min={PER_DAY_MIN}
+                                        max={PER_DAY_MAX}
+                                        step={1}
+                                        onChange={setPerDay}
+                                        suffix="/ день"
+                                        ariaLabel="Количество креативов в день"
+                                      />
                                       {igYoutubeMonthlyTotal !== undefined && (
                                         <p className="mt-1 text-sm text-icl-muted">
                                           {formatMoney(igYoutubeMonthlyTotal)}$ / мес
@@ -1281,7 +1319,7 @@ export function OrderModal() {
                           {platform === 'telegram' && weeklyMode === 'fixed' && (
                             <p className="mt-1">
                               <span className="font-medium text-icl-text">
-                                {weeklyCount} креативов / неделю
+                                {weeklyCount} постов / неделю
                               </span>
                             </p>
                           )}
@@ -1306,50 +1344,34 @@ export function OrderModal() {
                             <div>
                               <p className="text-sm font-medium text-icl-text">Количество</p>
                               <p className="mt-1 text-xs text-icl-muted">
-                                От {selectedService.minimum ?? 1}
-                                {selectedService.maximum
-                                  ? `, шаг ${selectedService.step ?? 1}`
-                                  : ''}
+                                От {selectedService.minimum ?? 1} до{' '}
+                                {selectedService.maximum ?? 1000}, шаг{' '}
+                                {selectedService.step ?? 1}
                               </p>
                             </div>
-                            <p className="font-display text-xl font-semibold text-icl-accent">
-                              {quantity}
-                            </p>
-                          </div>
-                          {selectedService.maximum ? (
-                            <>
-                              <input
-                                type="range"
-                                min={selectedService.minimum ?? 1}
-                                max={selectedService.maximum}
-                                step={selectedService.step ?? 1}
-                                value={quantity}
-                                onChange={(event) => setQuantity(Number(event.target.value))}
-                                className="range-input"
-                                aria-label="Количество"
-                              />
-                              <div className="mt-2 flex justify-between text-xs text-icl-subtle">
-                                <span>{selectedService.minimum}</span>
-                                <span>{selectedService.maximum}</span>
-                              </div>
-                            </>
-                          ) : (
-                            <input
-                              type="number"
-                              min={selectedService.minimum ?? 1}
-                              step={selectedService.step ?? 1}
+                            <EditableQuantity
                               value={quantity}
-                              onChange={(event) =>
-                                setQuantity(
-                                  Math.max(
-                                    selectedService.minimum ?? 1,
-                                    Number(event.target.value),
-                                  ),
-                                )
-                              }
-                              className={inputClass}
+                              min={selectedService.minimum ?? 1}
+                              max={selectedService.maximum ?? 1000}
+                              step={selectedService.step ?? 1}
+                              onChange={setQuantity}
+                              ariaLabel="Количество"
                             />
-                          )}
+                          </div>
+                          <input
+                            type="range"
+                            min={selectedService.minimum ?? 1}
+                            max={selectedService.maximum ?? 1000}
+                            step={selectedService.step ?? 1}
+                            value={quantity}
+                            onChange={(event) => setQuantity(Number(event.target.value))}
+                            className="range-input"
+                            aria-label="Количество"
+                          />
+                          <div className="mt-2 flex justify-between text-xs text-icl-subtle">
+                            <span>{selectedService.minimum ?? 1}</span>
+                            <span>{selectedService.maximum ?? 1000}</span>
+                          </div>
                         </div>
                       )}
 
@@ -1373,17 +1395,6 @@ export function OrderModal() {
                           onChange={(event) => setDescription(event.target.value)}
                           className={inputClass}
                           placeholder="Что нужно сделать, для какого GEO и в какие сроки?"
-                        />
-                      </FormField>
-
-                      <FormField label="Примеры и референсы" htmlFor="order-references-extra">
-                        <textarea
-                          id="order-references-extra"
-                          rows={3}
-                          value={references}
-                          onChange={(event) => setReferences(event.target.value)}
-                          className={inputClass}
-                          placeholder="Опишите стиль, тон или примеры, на которые ориентироваться"
                         />
                       </FormField>
 
@@ -1416,7 +1427,7 @@ export function OrderModal() {
                       )}
                       {isSocial && platform === 'telegram' && weeklyMode === 'fixed' && (
                         <p className="mt-2 text-sm text-icl-muted">
-                          {weeklyCount} креативов / неделю
+                          {weeklyCount} постов / неделю
                         </p>
                       )}
                       {isSocial && platform === 'instagram-youtube' && igCreativeType && (
@@ -1489,11 +1500,6 @@ export function OrderModal() {
                         ID заявки: <span className="text-icl-text">{submittedPublicId}</span>
                       </p>
                     )}
-                    {submitWarning && (
-                      <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-600">
-                        {submitWarning}
-                      </p>
-                    )}
                     <Button type="button" onClick={handleClose} className="mt-8">
                       Готово
                     </Button>
@@ -1510,24 +1516,25 @@ export function OrderModal() {
             </div>
 
             {step !== 'success' && isAuthenticated && (
-              <footer className="flex items-center justify-between gap-3 border-t border-icl-border px-5 py-4 sm:px-8">
+              <footer className="safe-pb flex items-center justify-between gap-3 border-t border-icl-border px-4 py-3 sm:px-8 sm:py-4">
                 {step === 'details' ? (
-                  <Button type="button" variant="ghost" onClick={() => setStep('service')}>
+                  <Button type="button" variant="ghost" className="!px-3" onClick={() => setStep('service')}>
                     <ArrowLeft size={16} />
-                    Назад
+                    <span className="hidden sm:inline">Назад</span>
                   </Button>
                 ) : (
                   <span />
                 )}
 
                 {step === 'service' ? (
-                  <Button type="button" onClick={goToDetails}>
+                  <Button type="button" className="min-h-11 flex-1 sm:flex-none" onClick={goToDetails}>
                     Продолжить
                     <ArrowRight size={16} />
                   </Button>
                 ) : (
                   <Button
                     type="button"
+                    className="min-h-11 flex-1 sm:flex-none"
                     disabled={submitting}
                     onClick={() =>
                       dialogRef.current?.querySelector<HTMLFormElement>('form')?.requestSubmit()

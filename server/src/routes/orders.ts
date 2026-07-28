@@ -92,8 +92,6 @@ ordersPublicRoutes.post('/', async (c) => {
       meta: parseMeta(String(form.get('meta') || '')),
     })
 
-    const warnings: string[] = []
-
     if (incomingFiles.length) {
       try {
         const { files: uploaded, errors: fileErrors } = await uploadOrderFiles(
@@ -104,14 +102,10 @@ ordersPublicRoutes.post('/', async (c) => {
           order = await updateOrderFiles(order.id, uploaded)
         }
         if (fileErrors.length) {
-          warnings.push(
-            `Заявка сохранена, но часть файлов не загрузилась (${fileErrors.length}).`,
-          )
           console.warn('[orders.files]', fileErrors)
         }
       } catch (fileError) {
         console.warn('[orders.files]', fileError)
-        warnings.push('Заявка сохранена, но файлы временно не удалось загрузить.')
       }
     }
 
@@ -121,7 +115,7 @@ ordersPublicRoutes.post('/', async (c) => {
       error: telegram.error,
     })
     if (!telegram.ok) {
-      warnings.push('Заявка сохранена, но уведомление в Telegram временно недоступно')
+      console.warn('[orders.telegram]', telegram.error)
     }
 
     return c.json({
@@ -133,7 +127,6 @@ ordersPublicRoutes.post('/', async (c) => {
         filesCount: order.files.length,
         linksCount: order.links.length,
       },
-      warning: warnings.length ? warnings.join(' ') : undefined,
     })
   } catch (error) {
     console.error('[orders.create]', error)
