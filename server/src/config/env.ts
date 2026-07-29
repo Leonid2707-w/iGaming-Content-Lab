@@ -37,6 +37,10 @@ export const serverEnv = {
   supabaseServiceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
   telegramBotToken: required('TELEGRAM_BOT_TOKEN'),
   telegramAdminId: required('TELEGRAM_ADMIN_ID'),
+  /** Optional custom HTML template with {placeholders}. Use \n for newlines in .env */
+  telegramOrderTemplate: required('TELEGRAM_ORDER_TEMPLATE')?.replaceAll('\\n', '\n'),
+  googleSheetsWebhookUrl: required('GOOGLE_SHEETS_WEBHOOK_URL'),
+  googleSheetsWebhookSecret: required('GOOGLE_SHEETS_WEBHOOK_SECRET'),
   adminLogin: required('ADMIN_LOGIN') || required('VITE_ADMIN_LOGIN') || 'Leonid',
   adminPassword: required('ADMIN_PASSWORD') || required('VITE_ADMIN_PASSWORD') || '',
   adminApiSecret: adminApiSecret || 'icl-change-me-admin-secret',

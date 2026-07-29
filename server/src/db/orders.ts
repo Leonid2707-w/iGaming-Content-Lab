@@ -109,7 +109,7 @@ export async function updateOrderTelegramResult(
   result: { sent: boolean; error?: string },
 ) {
   const supabase = getSupabase()
-  await supabase
+  const { data, error } = await supabase
     .from('orders')
     .update({
       telegram_sent: result.sent,
@@ -117,6 +117,11 @@ export async function updateOrderTelegramResult(
       updated_at: new Date().toISOString(),
     })
     .eq('id', orderId)
+    .select('*')
+    .single()
+
+  if (error || !data) throw new Error(error?.message || 'Не удалось обновить статус Telegram')
+  return mapOrder(data as Record<string, unknown>)
 }
 
 export async function listOrders(params: {

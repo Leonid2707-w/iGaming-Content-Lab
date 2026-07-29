@@ -7,6 +7,7 @@ import {
 import { collectOrderLinks } from '../lib/links.js'
 import { optionalUserAuth } from '../middleware/userAuth.js'
 import { uploadOrderFiles } from '../services/storage.js'
+import { syncOrderToSheets } from '../services/googleSheets.js'
 import { sendTelegramOrderNotification } from '../services/telegram.js'
 
 function parseMeta(raw?: string) {
@@ -110,13 +111,16 @@ ordersPublicRoutes.post('/', async (c) => {
     }
 
     const telegram = await sendTelegramOrderNotification(order)
-    await updateOrderTelegramResult(order.id, {
+    order = await updateOrderTelegramResult(order.id, {
       sent: telegram.ok,
       error: telegram.error,
     })
     if (!telegram.ok) {
       console.warn('[orders.telegram]', telegram.error)
     }
+
+    // Не блокируем ответ клиенту, если таблица недоступна
+    void syncOrderToSheets(order)
 
     return c.json({
       ok: true,

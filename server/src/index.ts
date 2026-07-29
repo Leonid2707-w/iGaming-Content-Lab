@@ -25,6 +25,10 @@ app.get('/api/health', (c) =>
     ok: true,
     service: 'icl-api',
     telegramConfigured: Boolean(serverEnv.telegramBotToken && serverEnv.telegramAdminId),
+    telegramChatId: serverEnv.telegramAdminId || null,
+    sheetsConfigured: Boolean(
+      serverEnv.googleSheetsWebhookUrl && serverEnv.googleSheetsWebhookSecret,
+    ),
     supabaseConfigured: Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey),
     publicSiteUrl: serverEnv.publicSiteUrl || null,
     allowedOrigins: serverEnv.allowedOrigins,

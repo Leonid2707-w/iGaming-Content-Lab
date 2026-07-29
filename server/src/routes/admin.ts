@@ -11,6 +11,12 @@ import {
   listOrders,
   updateOrderStatus,
 } from '../db/orders.js'
+import {
+  deleteOrderFromSheets,
+  syncAllOrdersToSheets,
+  syncOrderToSheets,
+} from '../services/googleSheets.js'
+import { sendTelegramMessage } from '../services/telegram.js'
 import { refreshSignedUrls } from '../services/storage.js'
 import type { OrderStatus } from '../types/order.js'
 
@@ -74,6 +80,7 @@ adminRoutes.patch('/orders/:id/status', async (c) => {
     }
     const order = await updateOrderStatus(c.req.param('id'), status, body.note || '')
     const history = await getOrderHistory(order.id)
+    void syncOrderToSheets(order)
     return c.json({ ok: true, order, history })
   } catch (error) {
     return c.json(
@@ -83,10 +90,53 @@ adminRoutes.patch('/orders/:id/status', async (c) => {
   }
 })
 
+adminRoutes.post('/orders/sync-sheets', async (c) => {
+  try {
+    const orders = await listOrders({ search: '', sort: 'newest', status: 'all' })
+    const result = await syncAllOrdersToSheets(orders)
+    if (!result.ok) {
+      return c.json(
+        {
+          ok: false,
+          error: result.skipped
+            ? 'Google Sheets не настроен (GOOGLE_SHEETS_WEBHOOK_URL / SECRET)'
+            : result.error || 'Не удалось синхронизировать',
+        },
+        result.skipped ? 400 : 502,
+      )
+    }
+    return c.json({ ok: true, count: orders.length })
+  } catch (error) {
+    return c.json(
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Ошибка синхронизации с таблицей',
+      },
+      500,
+    )
+  }
+})
+
+adminRoutes.post('/telegram/test', async (c) => {
+  const result = await sendTelegramMessage(
+    [
+      '🧪 <b>Тест уведомлений iCL</b>',
+      '',
+      'Система заказов подключена и готова к работе.',
+      `<b>Время:</b> ${new Date().toLocaleString('ru-RU')}`,
+    ].join('\n'),
+  )
+  if (!result.ok) {
+    return c.json({ ok: false, error: result.error || 'Не удалось отправить' }, 502)
+  }
+  return c.json({ ok: true })
+})
+
 adminRoutes.delete('/orders/:id', async (c) => {
   try {
     const deleted = await deleteOrder(c.req.param('id'))
     if (!deleted) return c.json({ ok: false, error: 'Заявка не найдена' }, 404)
+    void deleteOrderFromSheets(deleted.public_id)
     return c.json({ ok: true })
   } catch (error) {
     return c.json(
