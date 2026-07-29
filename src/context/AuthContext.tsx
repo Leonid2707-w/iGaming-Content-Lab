@@ -69,7 +69,9 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
       throw new Error(
         response.ok
           ? 'Сервер вернул некорректный ответ'
-          : `Ошибка сервера (${response.status}). Проверьте, что API запущен.`,
+          : response.status === 404
+            ? 'API не найден (404). Откройте сайт как http://127.0.0.1:5173 и убедитесь, что npm run dev запущен.'
+            : `Ошибка сервера (${response.status}). Проверьте, что API запущен.`,
       )
     }
     return data

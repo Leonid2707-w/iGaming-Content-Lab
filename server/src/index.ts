@@ -42,6 +42,13 @@ app.route('/api/admin/portfolio', portfolioAdminRoutes)
 app.route('/api/admin/users', adminUsersRoutes)
 app.route('/api/files', filesPublicRoutes)
 
+app.notFound((c) => {
+  if (c.req.path.startsWith('/api')) {
+    return c.json({ ok: false, error: `API-маршрут не найден: ${c.req.method} ${c.req.path}` }, 404)
+  }
+  return c.text('Not Found', 404)
+})
+
 app.onError((error, c) => {
   console.error('[api]', error)
   return c.json({ ok: false, error: error.message || 'Internal error' }, 500)
