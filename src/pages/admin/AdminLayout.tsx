@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
+  BarChart3,
   Clapperboard,
   FileText,
   LayoutDashboard,
@@ -17,6 +18,7 @@ import { clsx } from 'clsx'
 
 const nav = [
   { to: '/admin', label: 'Обзор', icon: LayoutDashboard, end: true },
+  { to: '/admin/stats', label: 'Статистика', icon: BarChart3 },
   { to: '/admin/services', label: 'Услуги', icon: Package },
   { to: '/admin/portfolio', label: 'Примеры работ', icon: Clapperboard },
   { to: '/admin/users', label: 'Пользователи', icon: Users },

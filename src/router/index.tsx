@@ -10,6 +10,7 @@ import { AdminOrderDetailPage } from '@/pages/admin/AdminOrderDetailPage'
 import { AdminPlaceholderPage } from '@/pages/admin/AdminPlaceholderPage'
 import { AdminPortfolioPage } from '@/pages/admin/AdminPortfolioPage'
 import { AdminUsersPage } from '@/pages/admin/AdminUsersPage'
+import { AdminStatsPage } from '@/pages/admin/AdminStatsPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { RegisterPage } from '@/pages/auth/RegisterPage'
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
@@ -49,6 +50,7 @@ export const router = createBrowserRouter([
         element: <AdminLayout />,
         children: [
           { index: true, element: <AdminDashboardPage /> },
+          { path: 'stats', element: <AdminStatsPage /> },
           { path: 'services', element: <AdminServicesPage /> },
           { path: 'portfolio', element: <AdminPortfolioPage /> },
           { path: 'users', element: <AdminUsersPage /> },

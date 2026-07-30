@@ -18,6 +18,7 @@ import {
 } from '../services/googleSheets.js'
 import { sendTelegramMessage } from '../services/telegram.js'
 import { refreshSignedUrls } from '../services/storage.js'
+import { getAdminStats, parseStatsRange } from '../db/stats.js'
 import type { OrderStatus } from '../types/order.js'
 
 const allowedStatuses = new Set<OrderStatus>(['new', 'in_progress', 'done', 'cancelled'])
@@ -40,6 +41,26 @@ adminRoutes.post('/login', async (c) => {
 })
 
 adminRoutes.use('/*', requireAdmin)
+
+adminRoutes.get('/stats', async (c) => {
+  try {
+    const range = parseStatsRange({
+      from: c.req.query('from') || undefined,
+      to: c.req.query('to') || undefined,
+      preset: c.req.query('preset') || undefined,
+    })
+    const stats = await getAdminStats(range)
+    return c.json({ ok: true, stats })
+  } catch (error) {
+    return c.json(
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Ошибка загрузки статистики',
+      },
+      400,
+    )
+  }
+})
 
 adminRoutes.get('/orders', async (c) => {
   try {

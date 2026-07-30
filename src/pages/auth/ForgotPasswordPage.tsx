@@ -18,13 +18,18 @@ export function ForgotPasswordPage() {
     setError('')
     if (!isValidEmail(email)) return setError('Укажите корректный email.')
     setSubmitting(true)
-    const result = await requestPasswordReset(email)
-    setSubmitting(false)
-    if (!result.ok) {
-      setError(result.error || 'Не удалось отправить письмо')
-      return
+    try {
+      const result = await requestPasswordReset(email)
+      if (!result.ok) {
+        setError(result.error || 'Не удалось отправить письмо')
+        return
+      }
+      setDone(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось отправить письмо')
+    } finally {
+      setSubmitting(false)
     }
-    setDone(true)
   }
 
   return (

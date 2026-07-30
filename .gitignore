@@ -1,6 +1,7 @@
 node_modules
 uploads
 server/uploads
+server/data
 dist
 dist-ssr
 *.local

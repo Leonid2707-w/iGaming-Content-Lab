@@ -1,13 +1,16 @@
 import { setDefaultResultOrder } from 'node:dns'
+import { spawn } from 'node:child_process'
+import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { serverEnv } from '../config/env.js'
 import type { OrderRecord } from '../types/order.js'
 import { ORDER_STATUS_LABELS } from '../types/order.js'
 
-// На части сетей Telegram лучше открывается по IPv4
 try {
   setDefaultResultOrder('ipv4first')
 } catch {
-  // ignore older Node
+  // ignore
 }
 
 function escapeHtml(value: string): string {
@@ -35,7 +38,6 @@ function formatDate(iso: string) {
   })
 }
 
-/** Default HTML template. Override via TELEGRAM_ORDER_TEMPLATE in .env */
 export const DEFAULT_ORDER_TELEGRAM_TEMPLATE = [
   '🆕 <b>Новая заявка iCL</b>',
   '',
@@ -116,9 +118,104 @@ export type TelegramSendResult =
   | { ok: true }
   | { ok: false; error: string }
 
-export async function sendTelegramMessage(
+async function sendViaFetch(
+  token: string,
+  chatId: string,
   text: string,
 ): Promise<TelegramSendResult> {
+  try {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+      signal: AbortSignal.timeout(12_000),
+    })
+    const data = (await res.json()) as { ok?: boolean; description?: string }
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.description ?? `Telegram HTTP ${res.status}` }
+    }
+    return { ok: true }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Telegram network error',
+    }
+  }
+}
+
+/** На Windows Node/curl часто блокируются, а WinHTTP (PowerShell) проходит. */
+async function sendViaPowerShell(
+  token: string,
+  chatId: string,
+  text: string,
+): Promise<TelegramSendResult> {
+  const dir = await mkdtemp(join(tmpdir(), 'icl-tg-'))
+  const payloadPath = join(dir, 'payload.json')
+  const scriptPath = join(dir, 'send.ps1')
+
+  try {
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+      'utf8',
+    )
+
+    const script = `
+$ErrorActionPreference = 'Stop'
+$body = Get-Content -LiteralPath '${payloadPath.replaceAll("'", "''")}' -Raw -Encoding UTF8
+$uri = 'https://api.telegram.org/bot${token}/sendMessage'
+$res = Invoke-RestMethod -Uri $uri -Method Post -ContentType 'application/json; charset=utf-8' -Body $body -TimeoutSec 25
+if (-not $res.ok) { throw ($res.description | Out-String) }
+Write-Output 'OK'
+`.trim()
+
+    await writeFile(scriptPath, script, 'utf8')
+
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = spawn(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+        { windowsHide: true },
+      )
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk)
+      })
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk)
+      })
+      child.on('error', reject)
+      child.on('close', (code) => {
+        if (code === 0 && stdout.includes('OK')) resolve(stdout)
+        else reject(new Error(stderr.trim() || stdout.trim() || `PowerShell exit ${code}`))
+      })
+    })
+
+    void output
+    return { ok: true }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Telegram PowerShell error',
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
+export async function sendTelegramMessage(text: string): Promise<TelegramSendResult> {
   const token = serverEnv.telegramBotToken
   const adminId = serverEnv.telegramAdminId
 
@@ -129,42 +226,23 @@ export async function sendTelegramMessage(
     }
   }
 
-  try {
-    const url = `https://api.telegram.org/bot${token}/sendMessage`
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: adminId,
-        text,
-        parse_mode: 'HTML',
-        disable_web_page_preview: true,
-      }),
-      signal: AbortSignal.timeout(25000),
-    })
+  const primary = await sendViaFetch(token, adminId, text)
+  if (primary.ok) return primary
 
-    const data = (await res.json()) as { ok?: boolean; description?: string }
-    if (!res.ok || !data.ok) {
-      return {
-        ok: false,
-        error: data.description ?? `Telegram HTTP ${res.status}`,
-      }
+  if (process.platform === 'win32') {
+    console.warn('[telegram] fetch failed, trying PowerShell fallback:', primary.error)
+    const fallback = await sendViaPowerShell(token, adminId, text)
+    if (fallback.ok) return fallback
+    return {
+      ok: false,
+      error: `fetch: ${primary.error}; powershell: ${fallback.error}`,
     }
-    return { ok: true }
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.name === 'TimeoutError' || error.name === 'AbortError'
-          ? 'Telegram API timeout (проверьте сеть/VPN)'
-          : error.message
-        : 'Telegram network error'
-    return { ok: false, error: message }
   }
+
+  return primary
 }
 
-export async function notifyNewOrder(
-  order: OrderRecord,
-): Promise<TelegramSendResult> {
+export async function notifyNewOrder(order: OrderRecord): Promise<TelegramSendResult> {
   return sendTelegramMessage(formatOrderTelegramMessage(order))
 }
 

@@ -305,13 +305,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const requestPasswordReset = useCallback(
     async (email: string) => {
       if (!configured) return { ok: false, error: 'Supabase не настроен на сервере' }
-      const data = await apiJson<{ ok: boolean; error?: string }>('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-      if (!data.ok) return { ok: false, error: data.error || 'Не удалось отправить письмо' }
-      return { ok: true }
+      try {
+        const data = await apiJson<{ ok: boolean; error?: string }>('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        })
+        if (!data.ok) return { ok: false, error: data.error || 'Не удалось отправить письмо' }
+        return { ok: true }
+      } catch (error) {
+        return {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Не удалось отправить письмо. Проверьте, что API запущен.',
+        }
+      }
     },
     [configured],
   )

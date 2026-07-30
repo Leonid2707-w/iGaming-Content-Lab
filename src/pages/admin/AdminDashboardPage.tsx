@@ -1,8 +1,23 @@
 import { Link } from 'react-router-dom'
-import { Clapperboard, FileText, Package, Settings, ShoppingBag, Users } from 'lucide-react'
+import {
+  BarChart3,
+  Clapperboard,
+  FileText,
+  Package,
+  Settings,
+  ShoppingBag,
+  Users,
+} from 'lucide-react'
 import { useServices } from '@/context/ServicesContext'
 
 const cards = [
+  {
+    to: '/admin/stats',
+    title: 'Статистика',
+    description: 'Посещения, уникальные визиты, заказы и графики по датам.',
+    icon: BarChart3,
+    ready: true,
+  },
   {
     to: '/admin/services',
     title: 'Управление услугами',

@@ -250,17 +250,47 @@ authRoutes.post('/login', async (c) => {
 })
 
 authRoutes.post('/forgot-password', async (c) => {
-  const body = await c.req.json<{ email?: string }>()
-  const email = (body.email || '').trim().toLowerCase()
+  const body = await c.req.json<{ email?: string }>().catch(() => ({}))
+  const email = String(body.email || '').trim().toLowerCase()
   if (!email) return c.json({ ok: false, error: 'Укажите email.' }, 400)
 
-  const supabase = getSupabase()
-  const origin = clientOrigin(c.req.header('Origin'))
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${origin}/auth/reset-password`,
-  })
-  if (error) return c.json({ ok: false, error: error.message }, 400)
-  return c.json({ ok: true })
+  try {
+    const supabase = getSupabase()
+    const origin = clientOrigin(c.req.header('Origin'))
+    const redirectTo = `${origin}/auth/reset-password`
+
+    // Не ждём бесконечно ответ почтового провайдера Supabase
+    const result = await Promise.race([
+      supabase.auth.resetPasswordForEmail(email, { redirectTo }),
+      new Promise<{ error: { message: string } }>((resolve) =>
+        setTimeout(
+          () =>
+            resolve({
+              error: {
+                message:
+                  'Таймаут отправки письма. Проверьте SMTP/лимиты в Supabase Auth или попробуйте позже.',
+              },
+            }),
+          12_000,
+        ),
+      ),
+    ])
+
+    if (result.error) {
+      console.warn('[auth.forgot-password]', result.error.message)
+      return c.json({ ok: false, error: result.error.message }, 400)
+    }
+    return c.json({ ok: true })
+  } catch (error) {
+    console.error('[auth.forgot-password]', error)
+    return c.json(
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Не удалось отправить письмо',
+      },
+      500,
+    )
+  }
 })
 
 authRoutes.post('/refresh', async (c) => {

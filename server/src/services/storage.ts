@@ -2,9 +2,23 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { getSupabase } from '../db/supabase.js'
 import type { OrderFile } from '../types/order.js'
 
 const uploadsRoot = join(fileURLToPath(new URL('../..', import.meta.url)), 'uploads')
+const BUCKET = 'order-files'
+/** Vercel request body limit ~4.5MB — keep headroom for multipart fields */
+const VERCEL_MAX_FILE_BYTES = 4 * 1024 * 1024
+
+function useLocalUploads() {
+  if (process.env.USE_LOCAL_UPLOADS === '1') return true
+  if (process.env.USE_LOCAL_UPLOADS === '0') return false
+  return process.env.VERCEL !== '1'
+}
+
+function maxFileBytes() {
+  return process.env.VERCEL === '1' ? VERCEL_MAX_FILE_BYTES : 100 * 1024 * 1024
+}
 
 function safeName(name: string) {
   return name.replace(/[^\w.\-()\sа-яА-ЯёЁ]/gi, '_').slice(0, 120) || 'file'
@@ -34,14 +48,50 @@ async function saveLocally(
   }
 }
 
+async function saveToSupabase(
+  orderPublicId: string,
+  buffer: Buffer,
+  originalName: string,
+  mime: string,
+): Promise<OrderFile> {
+  const supabase = getSupabase()
+  const fileId = randomUUID()
+  const filename = safeName(originalName)
+  const path = `${orderPublicId}/${fileId}-${filename}`
+
+  const { error } = await supabase.storage.from(BUCKET).upload(path, buffer, {
+    contentType: mime,
+    upsert: false,
+  })
+  if (error) throw new Error(error.message)
+
+  const { data, error: signError } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(path, 60 * 60 * 24 * 7)
+
+  if (signError || !data?.signedUrl) {
+    throw new Error(signError?.message || 'Не удалось создать ссылку на файл')
+  }
+
+  return {
+    name: originalName,
+    path,
+    url: data.signedUrl,
+    mime,
+    size: buffer.length,
+  }
+}
+
 export async function uploadOrderFiles(
-  _orderPublicId: string,
+  orderPublicId: string,
   files: File[],
 ): Promise<{ files: OrderFile[]; errors: string[] }> {
   if (!files.length) return { files: [], errors: [] }
 
   const uploaded: OrderFile[] = []
   const errors: string[] = []
+  const limit = maxFileBytes()
+  const local = useLocalUploads()
 
   for (const [index, file] of files.entries()) {
     const mime = file.type || 'application/octet-stream'
@@ -53,8 +103,18 @@ export async function uploadOrderFiles(
         errors.push(`${originalName}: пустой файл`)
         continue
       }
-      // Local disk — надёжно при нестабильном Supabase Storage
-      uploaded.push(await saveLocally(buffer, originalName, mime))
+      if (buffer.length > limit) {
+        errors.push(
+          `${originalName}: слишком большой файл (макс. ${Math.floor(limit / (1024 * 1024))} МБ на хостинге)`,
+        )
+        continue
+      }
+
+      uploaded.push(
+        local
+          ? await saveLocally(buffer, originalName, mime)
+          : await saveToSupabase(orderPublicId, buffer, originalName, mime),
+      )
     } catch (error) {
       errors.push(
         `${originalName}: ${error instanceof Error ? error.message : 'upload failed'}`,
@@ -71,16 +131,41 @@ export function resolveLocalUploadPath(fileId: string, filename: string) {
   return join(uploadsRoot, safeId, safeFile)
 }
 
+export function isLocalUploadPath(path: string) {
+  return /^[0-9a-f-]{36}\//i.test(path)
+}
+
 export async function refreshSignedUrls(files: OrderFile[]): Promise<OrderFile[]> {
-  return files.map((file) => {
-    if (/^[0-9a-f-]{36}\//i.test(file.path)) {
+  const supabase = getSupabase()
+  const result: OrderFile[] = []
+
+  for (const file of files) {
+    if (isLocalUploadPath(file.path)) {
       const [fileId, ...rest] = file.path.split('/')
-      return {
+      result.push({
         ...file,
         url: publicFileUrl(fileId, rest.join('/')),
+      })
+      continue
+    }
+
+    if (file.path.includes('/')) {
+      const { data, error } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUrl(file.path, 60 * 60 * 24 * 7)
+      if (!error && data?.signedUrl) {
+        result.push({ ...file, url: data.signedUrl })
+        continue
       }
     }
-    if (file.url.startsWith('/api/files/')) return file
-    return file
-  })
+
+    if (file.url.startsWith('/api/files/')) {
+      result.push(file)
+      continue
+    }
+
+    result.push(file)
+  }
+
+  return result
 }

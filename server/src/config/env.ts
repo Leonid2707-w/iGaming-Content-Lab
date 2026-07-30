@@ -1,7 +1,8 @@
 import { config } from 'dotenv'
 import { resolve } from 'node:path'
 
-config({ path: resolve(process.cwd(), '.env') })
+// Local .env; on Vercel env vars come from the dashboard (file may be absent).
+config({ path: resolve(process.cwd(), '.env'), quiet: true })
 
 function required(name: string, fallback?: string) {
   const value = process.env[name] ?? fallback
