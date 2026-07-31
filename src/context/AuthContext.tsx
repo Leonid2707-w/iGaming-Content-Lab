@@ -74,7 +74,7 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
           : response.status === 404
             ? local
               ? 'API не найден (404). Откройте http://127.0.0.1:5173 и запустите npm run dev.'
-              : 'API не найден (404). На Vercel не задеплоен /api — проверьте api/[[...route]].ts и редеплой.'
+              : 'API не найден (404). На Vercel проверьте rewrite /api → api/index и редеплой.'
             : local
               ? `Ошибка сервера (${response.status}). Проверьте, что npm run dev запущен.`
               : `Ошибка API (${response.status}). Откройте /api/health и логи функции в Vercel.`,

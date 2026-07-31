@@ -6,6 +6,7 @@ dist
 dist-ssr
 api/[[...route]].mjs
 api/index.mjs
+api/*.mjs
 *.local
 .env
 .env.*

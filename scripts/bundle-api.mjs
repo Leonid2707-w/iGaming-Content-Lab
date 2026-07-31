@@ -9,8 +9,8 @@ await esbuild.build({
   platform: 'node',
   target: 'node20',
   format: 'esm',
-  // Catch-all keeps /api/* path intact for Hono (no rewrite stripping).
-  outfile: 'api/[[...route]].mjs',
+  // Single entry + vercel.json rewrite (/api/* → /api) for nested routes.
+  outfile: 'api/index.mjs',
   sourcemap: false,
   logLevel: 'info',
   packages: 'bundle',
@@ -26,4 +26,4 @@ const __dirname = __dirnameFn(__filename);
   },
 })
 
-console.log('[bundle-api] wrote api/[[...route]].mjs')
+console.log('[bundle-api] wrote api/index.mjs')
