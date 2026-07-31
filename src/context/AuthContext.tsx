@@ -66,21 +66,39 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
     try {
       data = JSON.parse(text) as T
     } catch {
+      const host = typeof window !== 'undefined' ? window.location.hostname : ''
+      const local = host === 'localhost' || host === '127.0.0.1'
       throw new Error(
         response.ok
           ? 'Сервер вернул некорректный ответ'
           : response.status === 404
-            ? 'API не найден (404). Откройте сайт как http://127.0.0.1:5173 и убедитесь, что npm run dev запущен.'
-            : `Ошибка сервера (${response.status}). Проверьте, что API запущен.`,
+            ? local
+              ? 'API не найден (404). Откройте http://127.0.0.1:5173 и запустите npm run dev.'
+              : 'API не найден (404). На Vercel не задеплоен /api — проверьте api/[[...route]].ts и редеплой.'
+            : local
+              ? `Ошибка сервера (${response.status}). Проверьте, что npm run dev запущен.`
+              : `Ошибка API (${response.status}). Откройте /api/health и логи функции в Vercel.`,
       )
     }
     return data
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('Сервер не отвечает. Проверьте, что npm run dev запущен, и попробуйте снова.')
+      const host = typeof window !== 'undefined' ? window.location.hostname : ''
+      const local = host === 'localhost' || host === '127.0.0.1'
+      throw new Error(
+        local
+          ? 'Сервер не отвечает. Запустите npm run dev и попробуйте снова.'
+          : 'API не отвечает. Проверьте деплой и логи функции в Vercel.',
+      )
     }
     if (error instanceof TypeError) {
-      throw new Error('Нет связи с API. Запустите сервер (npm run dev) и обновите страницу.')
+      const host = typeof window !== 'undefined' ? window.location.hostname : ''
+      const local = host === 'localhost' || host === '127.0.0.1'
+      throw new Error(
+        local
+          ? 'Нет связи с API. Запустите npm run dev и обновите страницу.'
+          : 'Нет связи с API на домене. Проверьте https://www.igamingcontentlab.pro/api/health',
+      )
     }
     throw error
   } finally {

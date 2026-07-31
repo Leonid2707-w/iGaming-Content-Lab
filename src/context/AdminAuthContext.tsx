@@ -104,12 +104,17 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       setLoginModalOpen(false)
       return { ok: true }
     } catch (error) {
+      const host = typeof window !== 'undefined' ? window.location.hostname : ''
+      const local = host === 'localhost' || host === '127.0.0.1'
+      const hint = local
+        ? 'Убедитесь, что запущен npm run dev.'
+        : 'На домене проверьте Vercel: /api/health и Environment Variables.'
       return {
         ok: false,
         error:
           error instanceof Error
-            ? `API недоступен: ${error.message}. Убедитесь, что запущен npm run dev.`
-            : 'API заявок недоступен. Запустите npm run dev.',
+            ? `API недоступен: ${error.message}. ${hint}`
+            : `API заявок недоступен. ${hint}`,
       }
     }
   }, [])
