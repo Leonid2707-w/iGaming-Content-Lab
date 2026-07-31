@@ -4,6 +4,8 @@ server/uploads
 server/data
 dist
 dist-ssr
+api/[[...route]].mjs
+api/index.mjs
 *.local
 .env
 .env.*
