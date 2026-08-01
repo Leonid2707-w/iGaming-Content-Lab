@@ -368,7 +368,8 @@ var require_main = __commonJS({
 import { resolve } from "node:path";
 function required(name, fallback) {
   const value = process.env[name] ?? fallback;
-  return value?.trim() || void 0;
+  const cleaned = value?.trim().replace(/^['"]|['"]$/g, "").replace(/\r?\n/g, "");
+  return cleaned || void 0;
 }
 function parseOrigins(raw2, publicSiteUrl2) {
   const defaults = ["http://127.0.0.1:5173", "http://localhost:5173"];
@@ -24029,6 +24030,9 @@ var Hono2 = class extends Hono {
   }
 };
 
+// server/src/app.ts
+import { setDefaultResultOrder as setDefaultResultOrder2 } from "node:dns";
+
 // node_modules/hono/dist/middleware/cors/index.js
 var cors = (options) => {
   const opts = {
@@ -25287,8 +25291,11 @@ authRoutes.get("/status", (c) => {
     return c.json({ ok: true, configured: false, reason });
   }
 });
-function mapAuthError(message) {
-  const lower = message.toLowerCase();
+function mapAuthError(message, cause) {
+  const lower = `${message} ${cause ?? ""}`.toLowerCase();
+  if (lower.includes("fetch failed") || lower.includes("enotfound") || lower.includes("econnrefused") || lower.includes("etimedout") || lower.includes("network") || lower.includes("aborted")) {
+    return "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u0432\u044F\u0437\u0430\u0442\u044C\u0441\u044F \u0441 Supabase \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u0430. \u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 SUPABASE_URL / SERVICE_ROLE_KEY \u0432 Vercel \u0438 \u0447\u0442\u043E \u043F\u0440\u043E\u0435\u043A\u0442 Supabase \u043D\u0435 \u043D\u0430 \u043F\u0430\u0443\u0437\u0435.";
+  }
   if (lower.includes("rate limit")) {
     return "\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u043D\u043E\u0433\u043E \u043F\u043E\u043F\u044B\u0442\u043E\u043A \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438. \u041F\u043E\u0434\u043E\u0436\u0434\u0438\u0442\u0435 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u0438\u043D\u0443\u0442 \u0438 \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0441\u043D\u043E\u0432\u0430.";
   }
@@ -25298,7 +25305,7 @@ function mapAuthError(message) {
   if (lower.includes("is invalid") && lower.includes("email")) {
     return "\u0423\u043A\u0430\u0436\u0438\u0442\u0435 \u043A\u043E\u0440\u0440\u0435\u043A\u0442\u043D\u044B\u0439 email.";
   }
-  if (lower.includes("password")) {
+  if (lower.includes("password") && !lower.includes("invalid login")) {
     return "\u041F\u0430\u0440\u043E\u043B\u044C \u043D\u0435 \u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u0435\u0442 \u0442\u0440\u0435\u0431\u043E\u0432\u0430\u043D\u0438\u044F\u043C Supabase (\u043C\u0438\u043D\u0438\u043C\u0443\u043C 8 \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432).";
   }
   return message;
@@ -25394,32 +25401,44 @@ authRoutes.post("/register", async (c) => {
   });
 });
 authRoutes.post("/login", async (c) => {
-  const body = await c.req.json();
-  const email = (body.email || "").trim().toLowerCase();
-  const password = body.password || "";
-  if (!email || !password) {
-    return c.json({ ok: false, error: "\u0423\u043A\u0430\u0436\u0438\u0442\u0435 email \u0438 \u043F\u0430\u0440\u043E\u043B\u044C." }, 400);
+  try {
+    const body = await c.req.json();
+    const email = (body.email || "").trim().toLowerCase();
+    const password = body.password || "";
+    if (!email || !password) {
+      return c.json({ ok: false, error: "\u0423\u043A\u0430\u0436\u0438\u0442\u0435 email \u0438 \u043F\u0430\u0440\u043E\u043B\u044C." }, 400);
+    }
+    const supabase = getSupabase();
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      const raw2 = error.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0432\u043E\u0439\u0442\u0438";
+      if (raw2.toLowerCase().includes("invalid login") || raw2.toLowerCase().includes("invalid credentials")) {
+        return c.json({ ok: false, error: "\u041D\u0435\u0432\u0435\u0440\u043D\u044B\u0439 email \u0438\u043B\u0438 \u043F\u0430\u0440\u043E\u043B\u044C." }, 400);
+      }
+      return c.json({ ok: false, error: mapAuthError(raw2) }, 400);
+    }
+    if (!data.user || !data.session) {
+      return c.json({ ok: false, error: "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0432\u043E\u0439\u0442\u0438" }, 400);
+    }
+    const profile = await ensureProfileFromUser(data.user);
+    if (profile?.account_status === "blocked") {
+      return c.json({ ok: false, error: "\u0410\u043A\u043A\u0430\u0443\u043D\u0442 \u0437\u0430\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u043D. \u0421\u0432\u044F\u0436\u0438\u0442\u0435\u0441\u044C \u0441 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u043E\u0439." }, 403);
+    }
+    return c.json({
+      ok: true,
+      session: {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        expires_at: data.session.expires_at,
+        user: mapUser(data.user)
+      },
+      profile
+    });
+  } catch (error) {
+    const err = error;
+    console.error("[auth.login]", err.message, err.cause);
+    return c.json({ ok: false, error: mapAuthError(err.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0432\u043E\u0439\u0442\u0438", err.cause) }, 502);
   }
-  const supabase = getSupabase();
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) return c.json({ ok: false, error: error.message }, 400);
-  if (!data.user || !data.session) {
-    return c.json({ ok: false, error: "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0432\u043E\u0439\u0442\u0438" }, 400);
-  }
-  const profile = await ensureProfileFromUser(data.user);
-  if (profile?.account_status === "blocked") {
-    return c.json({ ok: false, error: "\u0410\u043A\u043A\u0430\u0443\u043D\u0442 \u0437\u0430\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u043D. \u0421\u0432\u044F\u0436\u0438\u0442\u0435\u0441\u044C \u0441 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u043E\u0439." }, 403);
-  }
-  return c.json({
-    ok: true,
-    session: {
-      access_token: data.session.access_token,
-      refresh_token: data.session.refresh_token,
-      expires_at: data.session.expires_at,
-      user: mapUser(data.user)
-    },
-    profile
-  });
 });
 authRoutes.post("/forgot-password", async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -26016,6 +26035,10 @@ visitsPublicRoutes.post("/", async (c) => {
 });
 
 // server/src/app.ts
+try {
+  setDefaultResultOrder2("ipv4first");
+} catch {
+}
 var app = new Hono2();
 app.use(
   "*",
@@ -26025,9 +26048,31 @@ app.use(
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
   })
 );
-app.get(
-  "/api/health",
-  (c) => c.json({
+async function probeSupabase() {
+  const url = serverEnv.supabaseUrl?.replace(/\/$/, "");
+  const key = serverEnv.supabaseServiceRoleKey;
+  if (!url || !key) return { ok: false, error: "missing env" };
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8e3);
+    const res = await fetch(`${url}/auth/v1/health`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    return { ok: res.ok, status: res.status };
+  } catch (error) {
+    const err = error;
+    return {
+      ok: false,
+      error: err.message || "fetch failed",
+      cause: err.cause ? String(err.cause) : void 0
+    };
+  }
+}
+app.get("/api/health", async (c) => {
+  const supabaseProbe = await probeSupabase();
+  return c.json({
     ok: true,
     service: "icl-api",
     runtime: process.env.VERCEL ? "vercel" : "node",
@@ -26037,10 +26082,12 @@ app.get(
       serverEnv.googleSheetsWebhookUrl && serverEnv.googleSheetsWebhookSecret
     ),
     supabaseConfigured: Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey),
+    supabaseReachable: supabaseProbe.ok,
+    supabaseProbe,
     publicSiteUrl: serverEnv.publicSiteUrl || null,
     allowedOrigins: serverEnv.allowedOrigins
-  })
-);
+  });
+});
 app.route("/api/auth", authRoutes);
 app.route("/api/orders", ordersPublicRoutes);
 app.route("/api/visits", visitsPublicRoutes);

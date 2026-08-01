@@ -88,8 +88,18 @@ authRoutes.get('/status', (c) => {
   }
 })
 
-function mapAuthError(message: string) {
-  const lower = message.toLowerCase()
+function mapAuthError(message: string, cause?: unknown) {
+  const lower = `${message} ${cause ?? ''}`.toLowerCase()
+  if (
+    lower.includes('fetch failed') ||
+    lower.includes('enotfound') ||
+    lower.includes('econnrefused') ||
+    lower.includes('etimedout') ||
+    lower.includes('network') ||
+    lower.includes('aborted')
+  ) {
+    return 'Не удалось связаться с Supabase с сервера. Проверьте SUPABASE_URL / SERVICE_ROLE_KEY в Vercel и что проект Supabase не на паузе.'
+  }
   if (lower.includes('rate limit')) {
     return 'Слишком много попыток регистрации. Подождите несколько минут и попробуйте снова.'
   }
@@ -99,7 +109,7 @@ function mapAuthError(message: string) {
   if (lower.includes('is invalid') && lower.includes('email')) {
     return 'Укажите корректный email.'
   }
-  if (lower.includes('password')) {
+  if (lower.includes('password') && !lower.includes('invalid login')) {
     return 'Пароль не соответствует требованиям Supabase (минимум 8 символов).'
   }
   return message
@@ -219,36 +229,48 @@ authRoutes.post('/register', async (c) => {
 })
 
 authRoutes.post('/login', async (c) => {
-  const body = await c.req.json<{ email?: string; password?: string }>()
-  const email = (body.email || '').trim().toLowerCase()
-  const password = body.password || ''
+  try {
+    const body = await c.req.json<{ email?: string; password?: string }>()
+    const email = (body.email || '').trim().toLowerCase()
+    const password = body.password || ''
 
-  if (!email || !password) {
-    return c.json({ ok: false, error: 'Укажите email и пароль.' }, 400)
+    if (!email || !password) {
+      return c.json({ ok: false, error: 'Укажите email и пароль.' }, 400)
+    }
+
+    const supabase = getSupabase()
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      const raw = error.message || 'Не удалось войти'
+      if (raw.toLowerCase().includes('invalid login') || raw.toLowerCase().includes('invalid credentials')) {
+        return c.json({ ok: false, error: 'Неверный email или пароль.' }, 400)
+      }
+      return c.json({ ok: false, error: mapAuthError(raw) }, 400)
+    }
+    if (!data.user || !data.session) {
+      return c.json({ ok: false, error: 'Не удалось войти' }, 400)
+    }
+
+    const profile = await ensureProfileFromUser(data.user)
+    if (profile?.account_status === 'blocked') {
+      return c.json({ ok: false, error: 'Аккаунт заблокирован. Свяжитесь с поддержкой.' }, 403)
+    }
+
+    return c.json({
+      ok: true,
+      session: {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        expires_at: data.session.expires_at,
+        user: mapUser(data.user),
+      },
+      profile,
+    })
+  } catch (error) {
+    const err = error as Error & { cause?: unknown }
+    console.error('[auth.login]', err.message, err.cause)
+    return c.json({ ok: false, error: mapAuthError(err.message || 'Не удалось войти', err.cause) }, 502)
   }
-
-  const supabase = getSupabase()
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-  if (error) return c.json({ ok: false, error: error.message }, 400)
-  if (!data.user || !data.session) {
-    return c.json({ ok: false, error: 'Не удалось войти' }, 400)
-  }
-
-  const profile = await ensureProfileFromUser(data.user)
-  if (profile?.account_status === 'blocked') {
-    return c.json({ ok: false, error: 'Аккаунт заблокирован. Свяжитесь с поддержкой.' }, 403)
-  }
-
-  return c.json({
-    ok: true,
-    session: {
-      access_token: data.session.access_token,
-      refresh_token: data.session.refresh_token,
-      expires_at: data.session.expires_at,
-      user: mapUser(data.user),
-    },
-    profile,
-  })
 })
 
 authRoutes.post('/forgot-password', async (c) => {

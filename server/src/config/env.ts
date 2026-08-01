@@ -6,7 +6,9 @@ config({ path: resolve(process.cwd(), '.env'), quiet: true })
 
 function required(name: string, fallback?: string) {
   const value = process.env[name] ?? fallback
-  return value?.trim() || undefined
+  // Strip accidental quotes/newlines from Vercel dashboard paste.
+  const cleaned = value?.trim().replace(/^['"]|['"]$/g, '').replace(/\r?\n/g, '')
+  return cleaned || undefined
 }
 
 const weakSecrets = new Set([
