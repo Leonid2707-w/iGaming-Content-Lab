@@ -20,22 +20,32 @@ try {
   // ignore
 }
 
+let bootConfigError: string | null = null
 try {
   assertServerConfig()
 } catch (error) {
-  const message = error instanceof Error ? error.message : String(error)
-  if (serverEnv.isProduction) {
-    console.error('[icl-api] FATAL config:', message)
-    throw error
-  }
-  console.warn('[icl-api] config warning:', message)
+  bootConfigError = error instanceof Error ? error.message : String(error)
+  // Never crash the whole serverless function at import time — health/login
+  // must still respond so Vercel deploy is diagnosable.
+  console.error('[icl-api] config error:', bootConfigError)
 }
 
-void ensureOwnerAdmin().catch((error) => {
-  console.warn('[admins] seed failed:', error instanceof Error ? error.message : error)
-})
-
 export const app = new Hono()
+
+let ownerSeedStarted = false
+function scheduleOwnerSeed() {
+  if (ownerSeedStarted || bootConfigError) return
+  if (!serverEnv.supabaseUrl || !serverEnv.adminPassword) return
+  ownerSeedStarted = true
+  void ensureOwnerAdmin().catch((error) => {
+    console.warn('[admins] seed failed:', error instanceof Error ? error.message : error)
+  })
+}
+
+app.use('*', async (_c, next) => {
+  scheduleOwnerSeed()
+  await next()
+})
 
 app.use(
   '*',
@@ -48,7 +58,7 @@ app.use(
 
 app.get('/api/health', (c) =>
   c.json({
-    ok: true,
+    ok: !bootConfigError,
     service: 'icl-api',
     runtime: process.env.VERCEL ? 'vercel' : 'node',
     supabaseConfigured: Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey),
@@ -56,6 +66,7 @@ app.get('/api/health', (c) =>
     sheetsConfigured: Boolean(
       serverEnv.googleSheetsWebhookUrl && serverEnv.googleSheetsWebhookSecret,
     ),
+    configError: bootConfigError || undefined,
   }),
 )
 

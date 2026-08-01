@@ -28544,20 +28544,27 @@ try {
   setDefaultResultOrder2("ipv4first");
 } catch {
 }
+var bootConfigError = null;
 try {
   assertServerConfig();
 } catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  if (serverEnv.isProduction) {
-    console.error("[icl-api] FATAL config:", message);
-    throw error;
-  }
-  console.warn("[icl-api] config warning:", message);
+  bootConfigError = error instanceof Error ? error.message : String(error);
+  console.error("[icl-api] config error:", bootConfigError);
 }
-void ensureOwnerAdmin().catch((error) => {
-  console.warn("[admins] seed failed:", error instanceof Error ? error.message : error);
-});
 var app = new Hono2();
+var ownerSeedStarted = false;
+function scheduleOwnerSeed() {
+  if (ownerSeedStarted || bootConfigError) return;
+  if (!serverEnv.supabaseUrl || !serverEnv.adminPassword) return;
+  ownerSeedStarted = true;
+  void ensureOwnerAdmin().catch((error) => {
+    console.warn("[admins] seed failed:", error instanceof Error ? error.message : error);
+  });
+}
+app.use("*", async (_c, next) => {
+  scheduleOwnerSeed();
+  await next();
+});
 app.use(
   "*",
   cors({
@@ -28569,14 +28576,15 @@ app.use(
 app.get(
   "/api/health",
   (c) => c.json({
-    ok: true,
+    ok: !bootConfigError,
     service: "icl-api",
     runtime: process.env.VERCEL ? "vercel" : "node",
     supabaseConfigured: Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey),
     telegramConfigured: Boolean(serverEnv.telegramBotToken && serverEnv.telegramAdminId),
     sheetsConfigured: Boolean(
       serverEnv.googleSheetsWebhookUrl && serverEnv.googleSheetsWebhookSecret
-    )
+    ),
+    configError: bootConfigError || void 0
   })
 );
 app.route("/api/auth", authRoutes);
