@@ -18,9 +18,9 @@ export function HomePage() {
     <Layout>
       <Hero />
       <Clients />
+      <Projects />
       <StandardServices />
       <Features />
-      <Projects />
       <Process />
       <PartnerProgram />
       <About />
