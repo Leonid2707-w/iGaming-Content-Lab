@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+Disallow: /admin
+Disallow: /cabinet
+Disallow: /api/
+
+Sitemap: https://igamingcontentlab.pro/sitemap.xml

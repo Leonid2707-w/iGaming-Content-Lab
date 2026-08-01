@@ -4,7 +4,7 @@ export function normalizeLink(raw: string): string | null {
   if (!value) return null
 
   // Strip wrapping punctuation often pasted from chats
-  value = value.replace(/^[<\["'(]+/, '').replace(/[>\]"'),.]+$/, '')
+  value = value.replace(/^[<"'([]+/, '').replace(/[>"'),.\]]+$/, '')
 
   if (!/^https?:\/\//i.test(value)) {
     if (/^(t\.me|telegram\.me|www\.|docs\.google\.|drive\.google\.|youtu\.be|youtube\.com)/i.test(value)) {

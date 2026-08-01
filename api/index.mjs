@@ -385,19 +385,40 @@ function assertSupabaseConfig() {
     throw new Error(`Missing env: ${missing.join(", ")}`);
   }
 }
-var import_dotenv, publicSiteUrl, adminApiSecret, serverEnv;
+function assertAdminConfig() {
+  const missing = [];
+  if (!serverEnv.adminPassword) missing.push("ADMIN_PASSWORD");
+  if (!adminApiSecret || weakSecrets.has(adminApiSecret) || adminApiSecret.length < 24) {
+    missing.push("ADMIN_API_SECRET (\u0434\u043B\u0438\u043D\u043D\u044B\u0439 \u0441\u043B\u0443\u0447\u0430\u0439\u043D\u044B\u0439 \u0441\u0435\u043A\u0440\u0435\u0442 \u226524 \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432, \u043D\u0435 \u0434\u0435\u0444\u043E\u043B\u0442)");
+  }
+  if (missing.length) {
+    throw new Error(`Missing/weak env: ${missing.join(", ")}`);
+  }
+}
+function assertServerConfig() {
+  assertSupabaseConfig();
+  assertAdminConfig();
+}
+var import_dotenv, weakSecrets, publicSiteUrl, adminApiSecret, serverEnv;
 var init_env = __esm({
   "server/src/config/env.ts"() {
     import_dotenv = __toESM(require_main(), 1);
     (0, import_dotenv.config)({ path: resolve(process.cwd(), ".env"), quiet: true });
+    weakSecrets = /* @__PURE__ */ new Set([
+      "icl-change-me-admin-secret",
+      "replace-with-long-random-secret",
+      "secret",
+      "change-me"
+    ]);
     publicSiteUrl = required("PUBLIC_SITE_URL") || required("SITE_URL");
     adminApiSecret = required("ADMIN_API_SECRET");
     serverEnv = {
       port: Number(process.env.PORT || 8787),
       nodeEnv: process.env.NODE_ENV || "development",
+      isProduction: (process.env.NODE_ENV || "development") === "production" || Boolean(process.env.VERCEL),
       publicSiteUrl,
       allowedOrigins: parseOrigins(process.env.ALLOWED_ORIGINS, publicSiteUrl),
-      supabaseUrl: required("SUPABASE_URL") || required("VITE_SUPABASE_URL"),
+      supabaseUrl: required("SUPABASE_URL"),
       supabaseServiceRoleKey: required("SUPABASE_SERVICE_ROLE_KEY"),
       telegramBotToken: required("TELEGRAM_BOT_TOKEN"),
       telegramAdminId: required("TELEGRAM_ADMIN_ID"),
@@ -405,9 +426,9 @@ var init_env = __esm({
       telegramOrderTemplate: required("TELEGRAM_ORDER_TEMPLATE")?.replaceAll("\\n", "\n"),
       googleSheetsWebhookUrl: required("GOOGLE_SHEETS_WEBHOOK_URL"),
       googleSheetsWebhookSecret: required("GOOGLE_SHEETS_WEBHOOK_SECRET"),
-      adminLogin: required("ADMIN_LOGIN") || required("VITE_ADMIN_LOGIN") || "Leonid",
-      adminPassword: required("ADMIN_PASSWORD") || required("VITE_ADMIN_PASSWORD") || "",
-      adminApiSecret: adminApiSecret || "icl-change-me-admin-secret"
+      adminLogin: required("ADMIN_LOGIN") || "Leonid",
+      adminPassword: required("ADMIN_PASSWORD") || "",
+      adminApiSecret: adminApiSecret || ""
     };
   }
 });
@@ -13326,8 +13347,8 @@ var require_helpers = __commonJS({
     async function sha2562(randomString) {
       const encoder = new TextEncoder();
       const encodedData = encoder.encode(randomString);
-      const hash = await crypto.subtle.digest("SHA-256", encodedData);
-      const bytes = new Uint8Array(hash);
+      const hash2 = await crypto.subtle.digest("SHA-256", encodedData);
+      const bytes = new Uint8Array(hash2);
       return Array.from(bytes).map((c) => String.fromCharCode(c)).join("");
     }
     async function generatePKCEChallenge(verifier) {
@@ -21787,42 +21808,22 @@ var init_supabase = __esm({
 // server/src/services/storage.ts
 var storage_exports = {};
 __export(storage_exports, {
+  MAX_ORDER_FILE_BYTES: () => MAX_ORDER_FILE_BYTES,
   isLocalUploadPath: () => isLocalUploadPath,
   refreshSignedUrls: () => refreshSignedUrls,
   resolveLocalUploadPath: () => resolveLocalUploadPath,
   uploadOrderFiles: () => uploadOrderFiles
 });
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-function useLocalUploads() {
-  if (process.env.USE_LOCAL_UPLOADS === "1") return true;
-  if (process.env.USE_LOCAL_UPLOADS === "0") return false;
-  return process.env.VERCEL !== "1";
-}
-function maxFileBytes() {
-  return process.env.VERCEL === "1" ? VERCEL_MAX_FILE_BYTES : 100 * 1024 * 1024;
-}
 function safeName(name) {
   return name.replace(/[^\w.\-()\sа-яА-ЯёЁ]/gi, "_").slice(0, 120) || "file";
 }
-function publicFileUrl(fileId, filename) {
-  return `/api/files/${fileId}/${encodeURIComponent(filename)}`;
-}
-async function saveLocally(buffer, originalName, mime) {
-  const fileId = randomUUID();
-  const filename = safeName(originalName);
-  const diskPath = join(uploadsRoot, fileId, filename);
-  await mkdir(dirname(diskPath), { recursive: true });
-  await writeFile(diskPath, buffer);
-  return {
-    name: originalName,
-    path: `${fileId}/${filename}`,
-    url: publicFileUrl(fileId, filename),
-    mime,
-    size: buffer.length
-  };
+function isAllowedMime(mime) {
+  if (!mime) return true;
+  if (ALLOWED_MIME_EXACT.has(mime)) return true;
+  return ALLOWED_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
 }
 async function saveToSupabase(orderPublicId, buffer, originalName, mime) {
   const supabase = getSupabase();
@@ -21834,7 +21835,7 @@ async function saveToSupabase(orderPublicId, buffer, originalName, mime) {
     upsert: false
   });
   if (error) throw new Error(error.message);
-  const { data, error: signError } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60 * 60 * 24 * 7);
+  const { data, error: signError } = await supabase.storage.from(BUCKET).createSignedUrl(path, SIGNED_TTL_SEC);
   if (signError || !data?.signedUrl) {
     throw new Error(signError?.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0444\u0430\u0439\u043B");
   }
@@ -21850,26 +21851,24 @@ async function uploadOrderFiles(orderPublicId, files) {
   if (!files.length) return { files: [], errors: [] };
   const uploaded = [];
   const errors = [];
-  const limit = maxFileBytes();
-  const local = useLocalUploads();
   for (const [index, file] of files.entries()) {
     const mime = file.type || "application/octet-stream";
     const originalName = file.name || `file-${index + 1}`;
     try {
+      if (!isAllowedMime(mime)) {
+        errors.push(`${originalName}: \u043D\u0435\u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u044B\u0439 \u0442\u0438\u043F \u0444\u0430\u0439\u043B\u0430`);
+        continue;
+      }
       const buffer = Buffer.from(await file.arrayBuffer());
       if (!buffer.length) {
         errors.push(`${originalName}: \u043F\u0443\u0441\u0442\u043E\u0439 \u0444\u0430\u0439\u043B`);
         continue;
       }
-      if (buffer.length > limit) {
-        errors.push(
-          `${originalName}: \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u0431\u043E\u043B\u044C\u0448\u043E\u0439 \u0444\u0430\u0439\u043B (\u043C\u0430\u043A\u0441. ${Math.floor(limit / (1024 * 1024))} \u041C\u0411 \u043D\u0430 \u0445\u043E\u0441\u0442\u0438\u043D\u0433\u0435)`
-        );
+      if (buffer.length > MAX_ORDER_FILE_BYTES) {
+        errors.push(`${originalName}: \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u0431\u043E\u043B\u044C\u0448\u043E\u0439 \u0444\u0430\u0439\u043B (\u043C\u0430\u043A\u0441. 50 \u041C\u0411)`);
         continue;
       }
-      uploaded.push(
-        local ? await saveLocally(buffer, originalName, mime) : await saveToSupabase(orderPublicId, buffer, originalName, mime)
-      );
+      uploaded.push(await saveToSupabase(orderPublicId, buffer, originalName, mime));
     } catch (error) {
       errors.push(
         `${originalName}: ${error instanceof Error ? error.message : "upload failed"}`
@@ -21894,32 +21893,39 @@ async function refreshSignedUrls(files) {
       const [fileId, ...rest] = file.path.split("/");
       result.push({
         ...file,
-        url: publicFileUrl(fileId, rest.join("/"))
+        url: `/api/files/${fileId}/${encodeURIComponent(rest.join("/"))}`
       });
       continue;
     }
     if (file.path.includes("/")) {
-      const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(file.path, 60 * 60 * 24 * 7);
+      const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(file.path, SIGNED_TTL_SEC);
       if (!error && data?.signedUrl) {
         result.push({ ...file, url: data.signedUrl });
         continue;
       }
     }
-    if (file.url.startsWith("/api/files/")) {
-      result.push(file);
-      continue;
-    }
     result.push(file);
   }
   return result;
 }
-var uploadsRoot, BUCKET, VERCEL_MAX_FILE_BYTES;
+var BUCKET, uploadsRoot, MAX_ORDER_FILE_BYTES, SIGNED_TTL_SEC, ALLOWED_MIME_PREFIXES, ALLOWED_MIME_EXACT;
 var init_storage = __esm({
   "server/src/services/storage.ts"() {
     init_supabase();
-    uploadsRoot = join(fileURLToPath(new URL("../..", import.meta.url)), "uploads");
     BUCKET = "order-files";
-    VERCEL_MAX_FILE_BYTES = 4 * 1024 * 1024;
+    uploadsRoot = join(fileURLToPath(new URL("../..", import.meta.url)), "uploads");
+    MAX_ORDER_FILE_BYTES = 50 * 1024 * 1024;
+    SIGNED_TTL_SEC = 60 * 60;
+    ALLOWED_MIME_PREFIXES = ["image/", "video/", "audio/", "application/pdf"];
+    ALLOWED_MIME_EXACT = /* @__PURE__ */ new Set([
+      "application/zip",
+      "application/x-zip-compressed",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/plain"
+    ]);
   }
 });
 
@@ -24118,6 +24124,1935 @@ var cors = (options) => {
 // server/src/app.ts
 init_env();
 
+// server/src/db/admins.ts
+init_supabase();
+
+// server/src/config/adminPermissions.ts
+var ADMIN_PERMISSIONS = [
+  "services.prices",
+  "services.units",
+  "services.list",
+  "orders.view",
+  "orders.status",
+  "orders.delete",
+  "orders.clients",
+  "site.texts",
+  "site.examples",
+  "site.videos",
+  "site.images",
+  "site.faq",
+  "users.view",
+  "users.block",
+  "users.delete",
+  "analytics.visits",
+  "analytics.orders",
+  "analytics.registrations",
+  "analytics.finance",
+  "admins.create",
+  "admins.delete",
+  "admins.permissions"
+];
+function isAdminPermission(value) {
+  return ADMIN_PERMISSIONS.includes(value);
+}
+function sanitizePermissions(list) {
+  if (!Array.isArray(list)) return [];
+  return [...new Set(list.filter((item) => isAdminPermission(String(item))))];
+}
+function hasPermission(admin, key) {
+  if (admin.isOwner) return true;
+  return Boolean(admin.permissions?.includes(key));
+}
+function hasAnyPermission(admin, keys) {
+  if (admin.isOwner) return true;
+  return keys.some((key) => hasPermission(admin, key));
+}
+
+// node_modules/bcryptjs/index.js
+import nodeCrypto from "crypto";
+var randomFallback = null;
+function randomBytes(len) {
+  try {
+    return crypto.getRandomValues(new Uint8Array(len));
+  } catch {
+  }
+  try {
+    return nodeCrypto.randomBytes(len);
+  } catch {
+  }
+  if (!randomFallback) {
+    throw Error(
+      "Neither WebCryptoAPI nor a crypto module is available. Use bcrypt.setRandomFallback to set an alternative"
+    );
+  }
+  return randomFallback(len);
+}
+function setRandomFallback(random) {
+  randomFallback = random;
+}
+function genSaltSync(rounds, seed_length) {
+  rounds = rounds || GENSALT_DEFAULT_LOG2_ROUNDS;
+  if (typeof rounds !== "number")
+    throw Error(
+      "Illegal arguments: " + typeof rounds + ", " + typeof seed_length
+    );
+  if (rounds < 4) rounds = 4;
+  else if (rounds > 31) rounds = 31;
+  var salt = [];
+  salt.push("$2b$");
+  if (rounds < 10) salt.push("0");
+  salt.push(rounds.toString());
+  salt.push("$");
+  salt.push(base64_encode(randomBytes(BCRYPT_SALT_LEN), BCRYPT_SALT_LEN));
+  return salt.join("");
+}
+function genSalt(rounds, seed_length, callback) {
+  if (typeof seed_length === "function")
+    callback = seed_length, seed_length = void 0;
+  if (typeof rounds === "function") callback = rounds, rounds = void 0;
+  if (typeof rounds === "undefined") rounds = GENSALT_DEFAULT_LOG2_ROUNDS;
+  else if (typeof rounds !== "number")
+    throw Error("illegal arguments: " + typeof rounds);
+  function _async(callback2) {
+    nextTick(function() {
+      try {
+        callback2(null, genSaltSync(rounds));
+      } catch (err) {
+        callback2(err);
+      }
+    });
+  }
+  if (callback) {
+    if (typeof callback !== "function")
+      throw Error("Illegal callback: " + typeof callback);
+    _async(callback);
+  } else
+    return new Promise(function(resolve3, reject) {
+      _async(function(err, res) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve3(res);
+      });
+    });
+}
+function hashSync(password, salt) {
+  if (typeof salt === "undefined") salt = GENSALT_DEFAULT_LOG2_ROUNDS;
+  if (typeof salt === "number") salt = genSaltSync(salt);
+  if (typeof password !== "string" || typeof salt !== "string")
+    throw Error("Illegal arguments: " + typeof password + ", " + typeof salt);
+  return _hash(password, salt);
+}
+function hash(password, salt, callback, progressCallback) {
+  function _async(callback2) {
+    if (typeof password === "string" && typeof salt === "number")
+      genSalt(salt, function(err, salt2) {
+        _hash(password, salt2, callback2, progressCallback);
+      });
+    else if (typeof password === "string" && typeof salt === "string")
+      _hash(password, salt, callback2, progressCallback);
+    else
+      nextTick(
+        callback2.bind(
+          this,
+          Error("Illegal arguments: " + typeof password + ", " + typeof salt)
+        )
+      );
+  }
+  if (callback) {
+    if (typeof callback !== "function")
+      throw Error("Illegal callback: " + typeof callback);
+    _async(callback);
+  } else
+    return new Promise(function(resolve3, reject) {
+      _async(function(err, res) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve3(res);
+      });
+    });
+}
+function safeStringCompare(known, unknown) {
+  var diff = known.length ^ unknown.length;
+  for (var i = 0; i < known.length; ++i) {
+    diff |= known.charCodeAt(i) ^ unknown.charCodeAt(i);
+  }
+  return diff === 0;
+}
+function compareSync(password, hash2) {
+  if (typeof password !== "string" || typeof hash2 !== "string")
+    throw Error("Illegal arguments: " + typeof password + ", " + typeof hash2);
+  if (hash2.length !== 60) return false;
+  return safeStringCompare(
+    hashSync(password, hash2.substring(0, hash2.length - 31)),
+    hash2
+  );
+}
+function compare(password, hashValue, callback, progressCallback) {
+  function _async(callback2) {
+    if (typeof password !== "string" || typeof hashValue !== "string") {
+      nextTick(
+        callback2.bind(
+          this,
+          Error(
+            "Illegal arguments: " + typeof password + ", " + typeof hashValue
+          )
+        )
+      );
+      return;
+    }
+    if (hashValue.length !== 60) {
+      nextTick(callback2.bind(this, null, false));
+      return;
+    }
+    hash(
+      password,
+      hashValue.substring(0, 29),
+      function(err, comp) {
+        if (err) callback2(err);
+        else callback2(null, safeStringCompare(comp, hashValue));
+      },
+      progressCallback
+    );
+  }
+  if (callback) {
+    if (typeof callback !== "function")
+      throw Error("Illegal callback: " + typeof callback);
+    _async(callback);
+  } else
+    return new Promise(function(resolve3, reject) {
+      _async(function(err, res) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve3(res);
+      });
+    });
+}
+function getRounds(hash2) {
+  if (typeof hash2 !== "string")
+    throw Error("Illegal arguments: " + typeof hash2);
+  return parseInt(hash2.split("$")[2], 10);
+}
+function getSalt(hash2) {
+  if (typeof hash2 !== "string")
+    throw Error("Illegal arguments: " + typeof hash2);
+  if (hash2.length !== 60)
+    throw Error("Illegal hash length: " + hash2.length + " != 60");
+  return hash2.substring(0, 29);
+}
+function truncates(password) {
+  if (typeof password !== "string")
+    throw Error("Illegal arguments: " + typeof password);
+  return utf8Length(password) > 72;
+}
+var nextTick = typeof setImmediate === "function" ? setImmediate : typeof scheduler === "object" && typeof scheduler.postTask === "function" ? scheduler.postTask.bind(scheduler) : setTimeout;
+function utf8Length(string) {
+  var len = 0, c = 0;
+  for (var i = 0; i < string.length; ++i) {
+    c = string.charCodeAt(i);
+    if (c < 128) len += 1;
+    else if (c < 2048) len += 2;
+    else if ((c & 64512) === 55296 && (string.charCodeAt(i + 1) & 64512) === 56320) {
+      ++i;
+      len += 4;
+    } else len += 3;
+  }
+  return len;
+}
+function utf8Array(string) {
+  var offset = 0, c1, c2;
+  var buffer = new Array(utf8Length(string));
+  for (var i = 0, k = string.length; i < k; ++i) {
+    c1 = string.charCodeAt(i);
+    if (c1 < 128) {
+      buffer[offset++] = c1;
+    } else if (c1 < 2048) {
+      buffer[offset++] = c1 >> 6 | 192;
+      buffer[offset++] = c1 & 63 | 128;
+    } else if ((c1 & 64512) === 55296 && ((c2 = string.charCodeAt(i + 1)) & 64512) === 56320) {
+      c1 = 65536 + ((c1 & 1023) << 10) + (c2 & 1023);
+      ++i;
+      buffer[offset++] = c1 >> 18 | 240;
+      buffer[offset++] = c1 >> 12 & 63 | 128;
+      buffer[offset++] = c1 >> 6 & 63 | 128;
+      buffer[offset++] = c1 & 63 | 128;
+    } else {
+      buffer[offset++] = c1 >> 12 | 224;
+      buffer[offset++] = c1 >> 6 & 63 | 128;
+      buffer[offset++] = c1 & 63 | 128;
+    }
+  }
+  return buffer;
+}
+var BASE64_CODE = "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".split("");
+var BASE64_INDEX = [
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  0,
+  1,
+  54,
+  55,
+  56,
+  57,
+  58,
+  59,
+  60,
+  61,
+  62,
+  63,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15,
+  16,
+  17,
+  18,
+  19,
+  20,
+  21,
+  22,
+  23,
+  24,
+  25,
+  26,
+  27,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1,
+  28,
+  29,
+  30,
+  31,
+  32,
+  33,
+  34,
+  35,
+  36,
+  37,
+  38,
+  39,
+  40,
+  41,
+  42,
+  43,
+  44,
+  45,
+  46,
+  47,
+  48,
+  49,
+  50,
+  51,
+  52,
+  53,
+  -1,
+  -1,
+  -1,
+  -1,
+  -1
+];
+function base64_encode(b, len) {
+  var off = 0, rs = [], c1, c2;
+  if (len <= 0 || len > b.length) throw Error("Illegal len: " + len);
+  while (off < len) {
+    c1 = b[off++] & 255;
+    rs.push(BASE64_CODE[c1 >> 2 & 63]);
+    c1 = (c1 & 3) << 4;
+    if (off >= len) {
+      rs.push(BASE64_CODE[c1 & 63]);
+      break;
+    }
+    c2 = b[off++] & 255;
+    c1 |= c2 >> 4 & 15;
+    rs.push(BASE64_CODE[c1 & 63]);
+    c1 = (c2 & 15) << 2;
+    if (off >= len) {
+      rs.push(BASE64_CODE[c1 & 63]);
+      break;
+    }
+    c2 = b[off++] & 255;
+    c1 |= c2 >> 6 & 3;
+    rs.push(BASE64_CODE[c1 & 63]);
+    rs.push(BASE64_CODE[c2 & 63]);
+  }
+  return rs.join("");
+}
+function base64_decode(s, len) {
+  var off = 0, slen = s.length, olen = 0, rs = [], c1, c2, c3, c4, o, code;
+  if (len <= 0) throw Error("Illegal len: " + len);
+  while (off < slen - 1 && olen < len) {
+    code = s.charCodeAt(off++);
+    c1 = code < BASE64_INDEX.length ? BASE64_INDEX[code] : -1;
+    code = s.charCodeAt(off++);
+    c2 = code < BASE64_INDEX.length ? BASE64_INDEX[code] : -1;
+    if (c1 == -1 || c2 == -1) break;
+    o = c1 << 2 >>> 0;
+    o |= (c2 & 48) >> 4;
+    rs.push(String.fromCharCode(o));
+    if (++olen >= len || off >= slen) break;
+    code = s.charCodeAt(off++);
+    c3 = code < BASE64_INDEX.length ? BASE64_INDEX[code] : -1;
+    if (c3 == -1) break;
+    o = (c2 & 15) << 4 >>> 0;
+    o |= (c3 & 60) >> 2;
+    rs.push(String.fromCharCode(o));
+    if (++olen >= len || off >= slen) break;
+    code = s.charCodeAt(off++);
+    c4 = code < BASE64_INDEX.length ? BASE64_INDEX[code] : -1;
+    o = (c3 & 3) << 6 >>> 0;
+    o |= c4;
+    rs.push(String.fromCharCode(o));
+    ++olen;
+  }
+  var res = [];
+  for (off = 0; off < olen; off++) res.push(rs[off].charCodeAt(0));
+  return res;
+}
+var BCRYPT_SALT_LEN = 16;
+var GENSALT_DEFAULT_LOG2_ROUNDS = 10;
+var BLOWFISH_NUM_ROUNDS = 16;
+var MAX_EXECUTION_TIME = 100;
+var P_ORIG = [
+  608135816,
+  2242054355,
+  320440878,
+  57701188,
+  2752067618,
+  698298832,
+  137296536,
+  3964562569,
+  1160258022,
+  953160567,
+  3193202383,
+  887688300,
+  3232508343,
+  3380367581,
+  1065670069,
+  3041331479,
+  2450970073,
+  2306472731
+];
+var S_ORIG = [
+  3509652390,
+  2564797868,
+  805139163,
+  3491422135,
+  3101798381,
+  1780907670,
+  3128725573,
+  4046225305,
+  614570311,
+  3012652279,
+  134345442,
+  2240740374,
+  1667834072,
+  1901547113,
+  2757295779,
+  4103290238,
+  227898511,
+  1921955416,
+  1904987480,
+  2182433518,
+  2069144605,
+  3260701109,
+  2620446009,
+  720527379,
+  3318853667,
+  677414384,
+  3393288472,
+  3101374703,
+  2390351024,
+  1614419982,
+  1822297739,
+  2954791486,
+  3608508353,
+  3174124327,
+  2024746970,
+  1432378464,
+  3864339955,
+  2857741204,
+  1464375394,
+  1676153920,
+  1439316330,
+  715854006,
+  3033291828,
+  289532110,
+  2706671279,
+  2087905683,
+  3018724369,
+  1668267050,
+  732546397,
+  1947742710,
+  3462151702,
+  2609353502,
+  2950085171,
+  1814351708,
+  2050118529,
+  680887927,
+  999245976,
+  1800124847,
+  3300911131,
+  1713906067,
+  1641548236,
+  4213287313,
+  1216130144,
+  1575780402,
+  4018429277,
+  3917837745,
+  3693486850,
+  3949271944,
+  596196993,
+  3549867205,
+  258830323,
+  2213823033,
+  772490370,
+  2760122372,
+  1774776394,
+  2652871518,
+  566650946,
+  4142492826,
+  1728879713,
+  2882767088,
+  1783734482,
+  3629395816,
+  2517608232,
+  2874225571,
+  1861159788,
+  326777828,
+  3124490320,
+  2130389656,
+  2716951837,
+  967770486,
+  1724537150,
+  2185432712,
+  2364442137,
+  1164943284,
+  2105845187,
+  998989502,
+  3765401048,
+  2244026483,
+  1075463327,
+  1455516326,
+  1322494562,
+  910128902,
+  469688178,
+  1117454909,
+  936433444,
+  3490320968,
+  3675253459,
+  1240580251,
+  122909385,
+  2157517691,
+  634681816,
+  4142456567,
+  3825094682,
+  3061402683,
+  2540495037,
+  79693498,
+  3249098678,
+  1084186820,
+  1583128258,
+  426386531,
+  1761308591,
+  1047286709,
+  322548459,
+  995290223,
+  1845252383,
+  2603652396,
+  3431023940,
+  2942221577,
+  3202600964,
+  3727903485,
+  1712269319,
+  422464435,
+  3234572375,
+  1170764815,
+  3523960633,
+  3117677531,
+  1434042557,
+  442511882,
+  3600875718,
+  1076654713,
+  1738483198,
+  4213154764,
+  2393238008,
+  3677496056,
+  1014306527,
+  4251020053,
+  793779912,
+  2902807211,
+  842905082,
+  4246964064,
+  1395751752,
+  1040244610,
+  2656851899,
+  3396308128,
+  445077038,
+  3742853595,
+  3577915638,
+  679411651,
+  2892444358,
+  2354009459,
+  1767581616,
+  3150600392,
+  3791627101,
+  3102740896,
+  284835224,
+  4246832056,
+  1258075500,
+  768725851,
+  2589189241,
+  3069724005,
+  3532540348,
+  1274779536,
+  3789419226,
+  2764799539,
+  1660621633,
+  3471099624,
+  4011903706,
+  913787905,
+  3497959166,
+  737222580,
+  2514213453,
+  2928710040,
+  3937242737,
+  1804850592,
+  3499020752,
+  2949064160,
+  2386320175,
+  2390070455,
+  2415321851,
+  4061277028,
+  2290661394,
+  2416832540,
+  1336762016,
+  1754252060,
+  3520065937,
+  3014181293,
+  791618072,
+  3188594551,
+  3933548030,
+  2332172193,
+  3852520463,
+  3043980520,
+  413987798,
+  3465142937,
+  3030929376,
+  4245938359,
+  2093235073,
+  3534596313,
+  375366246,
+  2157278981,
+  2479649556,
+  555357303,
+  3870105701,
+  2008414854,
+  3344188149,
+  4221384143,
+  3956125452,
+  2067696032,
+  3594591187,
+  2921233993,
+  2428461,
+  544322398,
+  577241275,
+  1471733935,
+  610547355,
+  4027169054,
+  1432588573,
+  1507829418,
+  2025931657,
+  3646575487,
+  545086370,
+  48609733,
+  2200306550,
+  1653985193,
+  298326376,
+  1316178497,
+  3007786442,
+  2064951626,
+  458293330,
+  2589141269,
+  3591329599,
+  3164325604,
+  727753846,
+  2179363840,
+  146436021,
+  1461446943,
+  4069977195,
+  705550613,
+  3059967265,
+  3887724982,
+  4281599278,
+  3313849956,
+  1404054877,
+  2845806497,
+  146425753,
+  1854211946,
+  1266315497,
+  3048417604,
+  3681880366,
+  3289982499,
+  290971e4,
+  1235738493,
+  2632868024,
+  2414719590,
+  3970600049,
+  1771706367,
+  1449415276,
+  3266420449,
+  422970021,
+  1963543593,
+  2690192192,
+  3826793022,
+  1062508698,
+  1531092325,
+  1804592342,
+  2583117782,
+  2714934279,
+  4024971509,
+  1294809318,
+  4028980673,
+  1289560198,
+  2221992742,
+  1669523910,
+  35572830,
+  157838143,
+  1052438473,
+  1016535060,
+  1802137761,
+  1753167236,
+  1386275462,
+  3080475397,
+  2857371447,
+  1040679964,
+  2145300060,
+  2390574316,
+  1461121720,
+  2956646967,
+  4031777805,
+  4028374788,
+  33600511,
+  2920084762,
+  1018524850,
+  629373528,
+  3691585981,
+  3515945977,
+  2091462646,
+  2486323059,
+  586499841,
+  988145025,
+  935516892,
+  3367335476,
+  2599673255,
+  2839830854,
+  265290510,
+  3972581182,
+  2759138881,
+  3795373465,
+  1005194799,
+  847297441,
+  406762289,
+  1314163512,
+  1332590856,
+  1866599683,
+  4127851711,
+  750260880,
+  613907577,
+  1450815602,
+  3165620655,
+  3734664991,
+  3650291728,
+  3012275730,
+  3704569646,
+  1427272223,
+  778793252,
+  1343938022,
+  2676280711,
+  2052605720,
+  1946737175,
+  3164576444,
+  3914038668,
+  3967478842,
+  3682934266,
+  1661551462,
+  3294938066,
+  4011595847,
+  840292616,
+  3712170807,
+  616741398,
+  312560963,
+  711312465,
+  1351876610,
+  322626781,
+  1910503582,
+  271666773,
+  2175563734,
+  1594956187,
+  70604529,
+  3617834859,
+  1007753275,
+  1495573769,
+  4069517037,
+  2549218298,
+  2663038764,
+  504708206,
+  2263041392,
+  3941167025,
+  2249088522,
+  1514023603,
+  1998579484,
+  1312622330,
+  694541497,
+  2582060303,
+  2151582166,
+  1382467621,
+  776784248,
+  2618340202,
+  3323268794,
+  2497899128,
+  2784771155,
+  503983604,
+  4076293799,
+  907881277,
+  423175695,
+  432175456,
+  1378068232,
+  4145222326,
+  3954048622,
+  3938656102,
+  3820766613,
+  2793130115,
+  2977904593,
+  26017576,
+  3274890735,
+  3194772133,
+  1700274565,
+  1756076034,
+  4006520079,
+  3677328699,
+  720338349,
+  1533947780,
+  354530856,
+  688349552,
+  3973924725,
+  1637815568,
+  332179504,
+  3949051286,
+  53804574,
+  2852348879,
+  3044236432,
+  1282449977,
+  3583942155,
+  3416972820,
+  4006381244,
+  1617046695,
+  2628476075,
+  3002303598,
+  1686838959,
+  431878346,
+  2686675385,
+  1700445008,
+  1080580658,
+  1009431731,
+  832498133,
+  3223435511,
+  2605976345,
+  2271191193,
+  2516031870,
+  1648197032,
+  4164389018,
+  2548247927,
+  300782431,
+  375919233,
+  238389289,
+  3353747414,
+  2531188641,
+  2019080857,
+  1475708069,
+  455242339,
+  2609103871,
+  448939670,
+  3451063019,
+  1395535956,
+  2413381860,
+  1841049896,
+  1491858159,
+  885456874,
+  4264095073,
+  4001119347,
+  1565136089,
+  3898914787,
+  1108368660,
+  540939232,
+  1173283510,
+  2745871338,
+  3681308437,
+  4207628240,
+  3343053890,
+  4016749493,
+  1699691293,
+  1103962373,
+  3625875870,
+  2256883143,
+  3830138730,
+  1031889488,
+  3479347698,
+  1535977030,
+  4236805024,
+  3251091107,
+  2132092099,
+  1774941330,
+  1199868427,
+  1452454533,
+  157007616,
+  2904115357,
+  342012276,
+  595725824,
+  1480756522,
+  206960106,
+  497939518,
+  591360097,
+  863170706,
+  2375253569,
+  3596610801,
+  1814182875,
+  2094937945,
+  3421402208,
+  1082520231,
+  3463918190,
+  2785509508,
+  435703966,
+  3908032597,
+  1641649973,
+  2842273706,
+  3305899714,
+  1510255612,
+  2148256476,
+  2655287854,
+  3276092548,
+  4258621189,
+  236887753,
+  3681803219,
+  274041037,
+  1734335097,
+  3815195456,
+  3317970021,
+  1899903192,
+  1026095262,
+  4050517792,
+  356393447,
+  2410691914,
+  3873677099,
+  3682840055,
+  3913112168,
+  2491498743,
+  4132185628,
+  2489919796,
+  1091903735,
+  1979897079,
+  3170134830,
+  3567386728,
+  3557303409,
+  857797738,
+  1136121015,
+  1342202287,
+  507115054,
+  2535736646,
+  337727348,
+  3213592640,
+  1301675037,
+  2528481711,
+  1895095763,
+  1721773893,
+  3216771564,
+  62756741,
+  2142006736,
+  835421444,
+  2531993523,
+  1442658625,
+  3659876326,
+  2882144922,
+  676362277,
+  1392781812,
+  170690266,
+  3921047035,
+  1759253602,
+  3611846912,
+  1745797284,
+  664899054,
+  1329594018,
+  3901205900,
+  3045908486,
+  2062866102,
+  2865634940,
+  3543621612,
+  3464012697,
+  1080764994,
+  553557557,
+  3656615353,
+  3996768171,
+  991055499,
+  499776247,
+  1265440854,
+  648242737,
+  3940784050,
+  980351604,
+  3713745714,
+  1749149687,
+  3396870395,
+  4211799374,
+  3640570775,
+  1161844396,
+  3125318951,
+  1431517754,
+  545492359,
+  4268468663,
+  3499529547,
+  1437099964,
+  2702547544,
+  3433638243,
+  2581715763,
+  2787789398,
+  1060185593,
+  1593081372,
+  2418618748,
+  4260947970,
+  69676912,
+  2159744348,
+  86519011,
+  2512459080,
+  3838209314,
+  1220612927,
+  3339683548,
+  133810670,
+  1090789135,
+  1078426020,
+  1569222167,
+  845107691,
+  3583754449,
+  4072456591,
+  1091646820,
+  628848692,
+  1613405280,
+  3757631651,
+  526609435,
+  236106946,
+  48312990,
+  2942717905,
+  3402727701,
+  1797494240,
+  859738849,
+  992217954,
+  4005476642,
+  2243076622,
+  3870952857,
+  3732016268,
+  765654824,
+  3490871365,
+  2511836413,
+  1685915746,
+  3888969200,
+  1414112111,
+  2273134842,
+  3281911079,
+  4080962846,
+  172450625,
+  2569994100,
+  980381355,
+  4109958455,
+  2819808352,
+  2716589560,
+  2568741196,
+  3681446669,
+  3329971472,
+  1835478071,
+  660984891,
+  3704678404,
+  4045999559,
+  3422617507,
+  3040415634,
+  1762651403,
+  1719377915,
+  3470491036,
+  2693910283,
+  3642056355,
+  3138596744,
+  1364962596,
+  2073328063,
+  1983633131,
+  926494387,
+  3423689081,
+  2150032023,
+  4096667949,
+  1749200295,
+  3328846651,
+  309677260,
+  2016342300,
+  1779581495,
+  3079819751,
+  111262694,
+  1274766160,
+  443224088,
+  298511866,
+  1025883608,
+  3806446537,
+  1145181785,
+  168956806,
+  3641502830,
+  3584813610,
+  1689216846,
+  3666258015,
+  3200248200,
+  1692713982,
+  2646376535,
+  4042768518,
+  1618508792,
+  1610833997,
+  3523052358,
+  4130873264,
+  2001055236,
+  3610705100,
+  2202168115,
+  4028541809,
+  2961195399,
+  1006657119,
+  2006996926,
+  3186142756,
+  1430667929,
+  3210227297,
+  1314452623,
+  4074634658,
+  4101304120,
+  2273951170,
+  1399257539,
+  3367210612,
+  3027628629,
+  1190975929,
+  2062231137,
+  2333990788,
+  2221543033,
+  2438960610,
+  1181637006,
+  548689776,
+  2362791313,
+  3372408396,
+  3104550113,
+  3145860560,
+  296247880,
+  1970579870,
+  3078560182,
+  3769228297,
+  1714227617,
+  3291629107,
+  3898220290,
+  166772364,
+  1251581989,
+  493813264,
+  448347421,
+  195405023,
+  2709975567,
+  677966185,
+  3703036547,
+  1463355134,
+  2715995803,
+  1338867538,
+  1343315457,
+  2802222074,
+  2684532164,
+  233230375,
+  2599980071,
+  2000651841,
+  3277868038,
+  1638401717,
+  4028070440,
+  3237316320,
+  6314154,
+  819756386,
+  300326615,
+  590932579,
+  1405279636,
+  3267499572,
+  3150704214,
+  2428286686,
+  3959192993,
+  3461946742,
+  1862657033,
+  1266418056,
+  963775037,
+  2089974820,
+  2263052895,
+  1917689273,
+  448879540,
+  3550394620,
+  3981727096,
+  150775221,
+  3627908307,
+  1303187396,
+  508620638,
+  2975983352,
+  2726630617,
+  1817252668,
+  1876281319,
+  1457606340,
+  908771278,
+  3720792119,
+  3617206836,
+  2455994898,
+  1729034894,
+  1080033504,
+  976866871,
+  3556439503,
+  2881648439,
+  1522871579,
+  1555064734,
+  1336096578,
+  3548522304,
+  2579274686,
+  3574697629,
+  3205460757,
+  3593280638,
+  3338716283,
+  3079412587,
+  564236357,
+  2993598910,
+  1781952180,
+  1464380207,
+  3163844217,
+  3332601554,
+  1699332808,
+  1393555694,
+  1183702653,
+  3581086237,
+  1288719814,
+  691649499,
+  2847557200,
+  2895455976,
+  3193889540,
+  2717570544,
+  1781354906,
+  1676643554,
+  2592534050,
+  3230253752,
+  1126444790,
+  2770207658,
+  2633158820,
+  2210423226,
+  2615765581,
+  2414155088,
+  3127139286,
+  673620729,
+  2805611233,
+  1269405062,
+  4015350505,
+  3341807571,
+  4149409754,
+  1057255273,
+  2012875353,
+  2162469141,
+  2276492801,
+  2601117357,
+  993977747,
+  3918593370,
+  2654263191,
+  753973209,
+  36408145,
+  2530585658,
+  25011837,
+  3520020182,
+  2088578344,
+  530523599,
+  2918365339,
+  1524020338,
+  1518925132,
+  3760827505,
+  3759777254,
+  1202760957,
+  3985898139,
+  3906192525,
+  674977740,
+  4174734889,
+  2031300136,
+  2019492241,
+  3983892565,
+  4153806404,
+  3822280332,
+  352677332,
+  2297720250,
+  60907813,
+  90501309,
+  3286998549,
+  1016092578,
+  2535922412,
+  2839152426,
+  457141659,
+  509813237,
+  4120667899,
+  652014361,
+  1966332200,
+  2975202805,
+  55981186,
+  2327461051,
+  676427537,
+  3255491064,
+  2882294119,
+  3433927263,
+  1307055953,
+  942726286,
+  933058658,
+  2468411793,
+  3933900994,
+  4215176142,
+  1361170020,
+  2001714738,
+  2830558078,
+  3274259782,
+  1222529897,
+  1679025792,
+  2729314320,
+  3714953764,
+  1770335741,
+  151462246,
+  3013232138,
+  1682292957,
+  1483529935,
+  471910574,
+  1539241949,
+  458788160,
+  3436315007,
+  1807016891,
+  3718408830,
+  978976581,
+  1043663428,
+  3165965781,
+  1927990952,
+  4200891579,
+  2372276910,
+  3208408903,
+  3533431907,
+  1412390302,
+  2931980059,
+  4132332400,
+  1947078029,
+  3881505623,
+  4168226417,
+  2941484381,
+  1077988104,
+  1320477388,
+  886195818,
+  18198404,
+  3786409e3,
+  2509781533,
+  112762804,
+  3463356488,
+  1866414978,
+  891333506,
+  18488651,
+  661792760,
+  1628790961,
+  3885187036,
+  3141171499,
+  876946877,
+  2693282273,
+  1372485963,
+  791857591,
+  2686433993,
+  3759982718,
+  3167212022,
+  3472953795,
+  2716379847,
+  445679433,
+  3561995674,
+  3504004811,
+  3574258232,
+  54117162,
+  3331405415,
+  2381918588,
+  3769707343,
+  4154350007,
+  1140177722,
+  4074052095,
+  668550556,
+  3214352940,
+  367459370,
+  261225585,
+  2610173221,
+  4209349473,
+  3468074219,
+  3265815641,
+  314222801,
+  3066103646,
+  3808782860,
+  282218597,
+  3406013506,
+  3773591054,
+  379116347,
+  1285071038,
+  846784868,
+  2669647154,
+  3771962079,
+  3550491691,
+  2305946142,
+  453669953,
+  1268987020,
+  3317592352,
+  3279303384,
+  3744833421,
+  2610507566,
+  3859509063,
+  266596637,
+  3847019092,
+  517658769,
+  3462560207,
+  3443424879,
+  370717030,
+  4247526661,
+  2224018117,
+  4143653529,
+  4112773975,
+  2788324899,
+  2477274417,
+  1456262402,
+  2901442914,
+  1517677493,
+  1846949527,
+  2295493580,
+  3734397586,
+  2176403920,
+  1280348187,
+  1908823572,
+  3871786941,
+  846861322,
+  1172426758,
+  3287448474,
+  3383383037,
+  1655181056,
+  3139813346,
+  901632758,
+  1897031941,
+  2986607138,
+  3066810236,
+  3447102507,
+  1393639104,
+  373351379,
+  950779232,
+  625454576,
+  3124240540,
+  4148612726,
+  2007998917,
+  544563296,
+  2244738638,
+  2330496472,
+  2058025392,
+  1291430526,
+  424198748,
+  50039436,
+  29584100,
+  3605783033,
+  2429876329,
+  2791104160,
+  1057563949,
+  3255363231,
+  3075367218,
+  3463963227,
+  1469046755,
+  985887462
+];
+var C_ORIG = [
+  1332899944,
+  1700884034,
+  1701343084,
+  1684370003,
+  1668446532,
+  1869963892
+];
+function _encipher(lr, off, P, S) {
+  var n, l = lr[off], r = lr[off + 1];
+  l ^= P[0];
+  n = S[l >>> 24];
+  n += S[256 | l >> 16 & 255];
+  n ^= S[512 | l >> 8 & 255];
+  n += S[768 | l & 255];
+  r ^= n ^ P[1];
+  n = S[r >>> 24];
+  n += S[256 | r >> 16 & 255];
+  n ^= S[512 | r >> 8 & 255];
+  n += S[768 | r & 255];
+  l ^= n ^ P[2];
+  n = S[l >>> 24];
+  n += S[256 | l >> 16 & 255];
+  n ^= S[512 | l >> 8 & 255];
+  n += S[768 | l & 255];
+  r ^= n ^ P[3];
+  n = S[r >>> 24];
+  n += S[256 | r >> 16 & 255];
+  n ^= S[512 | r >> 8 & 255];
+  n += S[768 | r & 255];
+  l ^= n ^ P[4];
+  n = S[l >>> 24];
+  n += S[256 | l >> 16 & 255];
+  n ^= S[512 | l >> 8 & 255];
+  n += S[768 | l & 255];
+  r ^= n ^ P[5];
+  n = S[r >>> 24];
+  n += S[256 | r >> 16 & 255];
+  n ^= S[512 | r >> 8 & 255];
+  n += S[768 | r & 255];
+  l ^= n ^ P[6];
+  n = S[l >>> 24];
+  n += S[256 | l >> 16 & 255];
+  n ^= S[512 | l >> 8 & 255];
+  n += S[768 | l & 255];
+  r ^= n ^ P[7];
+  n = S[r >>> 24];
+  n += S[256 | r >> 16 & 255];
+  n ^= S[512 | r >> 8 & 255];
+  n += S[768 | r & 255];
+  l ^= n ^ P[8];
+  n = S[l >>> 24];
+  n += S[256 | l >> 16 & 255];
+  n ^= S[512 | l >> 8 & 255];
+  n += S[768 | l & 255];
+  r ^= n ^ P[9];
+  n = S[r >>> 24];
+  n += S[256 | r >> 16 & 255];
+  n ^= S[512 | r >> 8 & 255];
+  n += S[768 | r & 255];
+  l ^= n ^ P[10];
+  n = S[l >>> 24];
+  n += S[256 | l >> 16 & 255];
+  n ^= S[512 | l >> 8 & 255];
+  n += S[768 | l & 255];
+  r ^= n ^ P[11];
+  n = S[r >>> 24];
+  n += S[256 | r >> 16 & 255];
+  n ^= S[512 | r >> 8 & 255];
+  n += S[768 | r & 255];
+  l ^= n ^ P[12];
+  n = S[l >>> 24];
+  n += S[256 | l >> 16 & 255];
+  n ^= S[512 | l >> 8 & 255];
+  n += S[768 | l & 255];
+  r ^= n ^ P[13];
+  n = S[r >>> 24];
+  n += S[256 | r >> 16 & 255];
+  n ^= S[512 | r >> 8 & 255];
+  n += S[768 | r & 255];
+  l ^= n ^ P[14];
+  n = S[l >>> 24];
+  n += S[256 | l >> 16 & 255];
+  n ^= S[512 | l >> 8 & 255];
+  n += S[768 | l & 255];
+  r ^= n ^ P[15];
+  n = S[r >>> 24];
+  n += S[256 | r >> 16 & 255];
+  n ^= S[512 | r >> 8 & 255];
+  n += S[768 | r & 255];
+  l ^= n ^ P[16];
+  lr[off] = r ^ P[BLOWFISH_NUM_ROUNDS + 1];
+  lr[off + 1] = l;
+  return lr;
+}
+function _streamtoword(data, offp) {
+  for (var i = 0, word = 0; i < 4; ++i)
+    word = word << 8 | data[offp] & 255, offp = (offp + 1) % data.length;
+  return { key: word, offp };
+}
+function _key(key, P, S) {
+  var offset = 0, lr = [0, 0], plen = P.length, slen = S.length, sw;
+  for (var i = 0; i < plen; i++)
+    sw = _streamtoword(key, offset), offset = sw.offp, P[i] = P[i] ^ sw.key;
+  for (i = 0; i < plen; i += 2)
+    lr = _encipher(lr, 0, P, S), P[i] = lr[0], P[i + 1] = lr[1];
+  for (i = 0; i < slen; i += 2)
+    lr = _encipher(lr, 0, P, S), S[i] = lr[0], S[i + 1] = lr[1];
+}
+function _ekskey(data, key, P, S) {
+  var offp = 0, lr = [0, 0], plen = P.length, slen = S.length, sw;
+  for (var i = 0; i < plen; i++)
+    sw = _streamtoword(key, offp), offp = sw.offp, P[i] = P[i] ^ sw.key;
+  offp = 0;
+  for (i = 0; i < plen; i += 2)
+    sw = _streamtoword(data, offp), offp = sw.offp, lr[0] ^= sw.key, sw = _streamtoword(data, offp), offp = sw.offp, lr[1] ^= sw.key, lr = _encipher(lr, 0, P, S), P[i] = lr[0], P[i + 1] = lr[1];
+  for (i = 0; i < slen; i += 2)
+    sw = _streamtoword(data, offp), offp = sw.offp, lr[0] ^= sw.key, sw = _streamtoword(data, offp), offp = sw.offp, lr[1] ^= sw.key, lr = _encipher(lr, 0, P, S), S[i] = lr[0], S[i + 1] = lr[1];
+}
+function _crypt(b, salt, rounds, callback, progressCallback) {
+  var cdata = C_ORIG.slice(), clen = cdata.length, err;
+  if (rounds < 4 || rounds > 31) {
+    err = Error("Illegal number of rounds (4-31): " + rounds);
+    if (callback) {
+      nextTick(callback.bind(this, err));
+      return;
+    } else throw err;
+  }
+  if (salt.length !== BCRYPT_SALT_LEN) {
+    err = Error(
+      "Illegal salt length: " + salt.length + " != " + BCRYPT_SALT_LEN
+    );
+    if (callback) {
+      nextTick(callback.bind(this, err));
+      return;
+    } else throw err;
+  }
+  rounds = 1 << rounds >>> 0;
+  var P, S, i = 0, j;
+  if (typeof Int32Array === "function") {
+    P = new Int32Array(P_ORIG);
+    S = new Int32Array(S_ORIG);
+  } else {
+    P = P_ORIG.slice();
+    S = S_ORIG.slice();
+  }
+  _ekskey(salt, b, P, S);
+  function next() {
+    if (progressCallback) progressCallback(i / rounds);
+    if (i < rounds) {
+      var start = Date.now();
+      for (; i < rounds; ) {
+        i = i + 1;
+        _key(b, P, S);
+        _key(salt, P, S);
+        if (Date.now() - start > MAX_EXECUTION_TIME) break;
+      }
+    } else {
+      for (i = 0; i < 64; i++)
+        for (j = 0; j < clen >> 1; j++) _encipher(cdata, j << 1, P, S);
+      var ret = [];
+      for (i = 0; i < clen; i++)
+        ret.push((cdata[i] >> 24 & 255) >>> 0), ret.push((cdata[i] >> 16 & 255) >>> 0), ret.push((cdata[i] >> 8 & 255) >>> 0), ret.push((cdata[i] & 255) >>> 0);
+      if (callback) {
+        callback(null, ret);
+        return;
+      } else return ret;
+    }
+    if (callback) nextTick(next);
+  }
+  if (typeof callback !== "undefined") {
+    next();
+  } else {
+    var res;
+    while (true) if (typeof (res = next()) !== "undefined") return res || [];
+  }
+}
+function _hash(password, salt, callback, progressCallback) {
+  var err;
+  if (typeof password !== "string" || typeof salt !== "string") {
+    err = Error("Invalid string / salt: Not a string");
+    if (callback) {
+      nextTick(callback.bind(this, err));
+      return;
+    } else throw err;
+  }
+  var minor, offset;
+  if (salt.charAt(0) !== "$" || salt.charAt(1) !== "2") {
+    err = Error("Invalid salt version: " + salt.substring(0, 2));
+    if (callback) {
+      nextTick(callback.bind(this, err));
+      return;
+    } else throw err;
+  }
+  if (salt.charAt(2) === "$") minor = String.fromCharCode(0), offset = 3;
+  else {
+    minor = salt.charAt(2);
+    if (minor !== "a" && minor !== "b" && minor !== "y" || salt.charAt(3) !== "$") {
+      err = Error("Invalid salt revision: " + salt.substring(2, 4));
+      if (callback) {
+        nextTick(callback.bind(this, err));
+        return;
+      } else throw err;
+    }
+    offset = 4;
+  }
+  if (salt.charAt(offset + 2) > "$") {
+    err = Error("Missing salt rounds");
+    if (callback) {
+      nextTick(callback.bind(this, err));
+      return;
+    } else throw err;
+  }
+  var r1 = parseInt(salt.substring(offset, offset + 1), 10) * 10, r2 = parseInt(salt.substring(offset + 1, offset + 2), 10), rounds = r1 + r2, real_salt = salt.substring(offset + 3, offset + 25);
+  password += minor >= "a" ? "\0" : "";
+  var passwordb = utf8Array(password), saltb = base64_decode(real_salt, BCRYPT_SALT_LEN);
+  function finish(bytes) {
+    var res = [];
+    res.push("$2");
+    if (minor >= "a") res.push(minor);
+    res.push("$");
+    if (rounds < 10) res.push("0");
+    res.push(rounds.toString());
+    res.push("$");
+    res.push(base64_encode(saltb, saltb.length));
+    res.push(base64_encode(bytes, C_ORIG.length * 4 - 1));
+    return res.join("");
+  }
+  if (typeof callback == "undefined")
+    return finish(_crypt(passwordb, saltb, rounds));
+  else {
+    _crypt(
+      passwordb,
+      saltb,
+      rounds,
+      function(err2, bytes) {
+        if (err2) callback(err2, null);
+        else callback(null, finish(bytes));
+      },
+      progressCallback
+    );
+  }
+}
+function encodeBase64(bytes, length) {
+  return base64_encode(bytes, length);
+}
+function decodeBase64(string, length) {
+  return base64_decode(string, length);
+}
+var bcryptjs_default = {
+  setRandomFallback,
+  genSaltSync,
+  genSalt,
+  hashSync,
+  hash,
+  compareSync,
+  compare,
+  getRounds,
+  getSalt,
+  truncates,
+  encodeBase64,
+  decodeBase64
+};
+
+// server/src/lib/password.ts
+var ROUNDS = 12;
+async function hashPassword(password) {
+  return bcryptjs_default.hash(password, ROUNDS);
+}
+async function verifyPassword(password, passwordHash) {
+  if (!password || !passwordHash) return false;
+  try {
+    return await bcryptjs_default.compare(password, passwordHash);
+  } catch {
+    return false;
+  }
+}
+
+// server/src/db/admins.ts
+init_env();
+function mapAdmin(row) {
+  return {
+    id: String(row.id),
+    login: String(row.login),
+    password_hash: String(row.password_hash),
+    display_name: String(row.display_name || ""),
+    is_owner: Boolean(row.is_owner),
+    is_active: Boolean(row.is_active),
+    permissions: sanitizePermissions(row.permissions),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at)
+  };
+}
+function toPublicAdmin(admin) {
+  return {
+    id: admin.id,
+    login: admin.login,
+    displayName: admin.display_name,
+    isOwner: admin.is_owner,
+    isActive: admin.is_active,
+    permissions: admin.is_owner ? [] : admin.permissions,
+    createdAt: admin.created_at,
+    updatedAt: admin.updated_at
+  };
+}
+async function findAdminByLogin(login) {
+  const supabase = getSupabase();
+  const normalized = login.trim().toLowerCase();
+  const { data, error } = await supabase.from("admin_users").select("*");
+  if (error) throw new Error(error.message);
+  const row = (data || []).find(
+    (item) => String(item.login || "").toLowerCase() === normalized
+  );
+  return row ? mapAdmin(row) : null;
+}
+async function findAdminById(id) {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.from("admin_users").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? mapAdmin(data) : null;
+}
+async function listAdmins() {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.from("admin_users").select("*").order("is_owner", { ascending: false }).order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data || []).map((row) => mapAdmin(row));
+}
+async function ensureOwnerAdmin() {
+  if (!serverEnv.adminPassword) {
+    console.warn("[admins] ADMIN_PASSWORD empty \u2014 owner seed skipped");
+    return;
+  }
+  const existing = await findAdminByLogin("leonid");
+  const passwordHash = await hashPassword(serverEnv.adminPassword);
+  if (existing) {
+    if (!existing.is_owner || !existing.is_active) {
+      const supabase2 = getSupabase();
+      await supabase2.from("admin_users").update({
+        is_owner: true,
+        is_active: true,
+        password_hash: passwordHash,
+        updated_at: (/* @__PURE__ */ new Date()).toISOString()
+      }).eq("id", existing.id);
+    } else {
+      const supabase2 = getSupabase();
+      await supabase2.from("admin_users").update({
+        password_hash: passwordHash,
+        updated_at: (/* @__PURE__ */ new Date()).toISOString()
+      }).eq("id", existing.id);
+    }
+    return;
+  }
+  const supabase = getSupabase();
+  const { error } = await supabase.from("admin_users").insert({
+    login: "leonid",
+    password_hash: passwordHash,
+    display_name: "\u0412\u043B\u0430\u0434\u0435\u043B\u0435\u0446",
+    is_owner: true,
+    is_active: true,
+    permissions: []
+  });
+  if (error) {
+    if (/relation .*admin_users.* does not exist|schema cache/i.test(error.message)) {
+      console.warn(
+        "[admins] \u0422\u0430\u0431\u043B\u0438\u0446\u0430 admin_users \u043E\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u0435\u0442. \u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 supabase/migrations/007_admin_users.sql"
+      );
+      return;
+    }
+    throw new Error(error.message);
+  }
+  console.info("[admins] Owner account leonid seeded");
+}
+async function createAdmin(input) {
+  const login = input.login.trim();
+  if (login.length < 2) throw new Error("\u0423\u043A\u0430\u0436\u0438\u0442\u0435 \u043B\u043E\u0433\u0438\u043D");
+  if (!input.password || input.password.length < 8) {
+    throw new Error("\u041F\u0430\u0440\u043E\u043B\u044C \u0434\u043E\u043B\u0436\u0435\u043D \u0431\u044B\u0442\u044C \u043D\u0435 \u043A\u043E\u0440\u043E\u0447\u0435 8 \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432");
+  }
+  if (login.toLowerCase() === "leonid") {
+    throw new Error("\u041B\u043E\u0433\u0438\u043D \u0432\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u0437\u0430\u0440\u0435\u0437\u0435\u0440\u0432\u0438\u0440\u043E\u0432\u0430\u043D");
+  }
+  const duplicate = await findAdminByLogin(login);
+  if (duplicate) throw new Error("\u0410\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0441 \u0442\u0430\u043A\u0438\u043C \u043B\u043E\u0433\u0438\u043D\u043E\u043C \u0443\u0436\u0435 \u0435\u0441\u0442\u044C");
+  const supabase = getSupabase();
+  const { data, error } = await supabase.from("admin_users").insert({
+    login,
+    password_hash: await hashPassword(input.password),
+    display_name: (input.displayName || "").trim(),
+    is_owner: false,
+    is_active: input.isActive !== false,
+    permissions: sanitizePermissions(input.permissions)
+  }).select("*").single();
+  if (error || !data) throw new Error(error?.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430");
+  return mapAdmin(data);
+}
+async function updateAdmin(id, patch) {
+  const current = await findAdminById(id);
+  if (!current) throw new Error("\u0410\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D");
+  if (current.is_owner) {
+    throw new Error("\u0412\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u043D\u0435\u043B\u044C\u0437\u044F \u0438\u0437\u043C\u0435\u043D\u044F\u0442\u044C");
+  }
+  const updates = {
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  if (patch.displayName !== void 0) updates.display_name = patch.displayName.trim();
+  if (patch.isActive !== void 0) updates.is_active = patch.isActive;
+  if (patch.permissions !== void 0) updates.permissions = sanitizePermissions(patch.permissions);
+  if (patch.password) {
+    if (patch.password.length < 8) throw new Error("\u041F\u0430\u0440\u043E\u043B\u044C \u0434\u043E\u043B\u0436\u0435\u043D \u0431\u044B\u0442\u044C \u043D\u0435 \u043A\u043E\u0440\u043E\u0447\u0435 8 \u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432");
+    updates.password_hash = await hashPassword(patch.password);
+  }
+  const supabase = getSupabase();
+  const { data, error } = await supabase.from("admin_users").update(updates).eq("id", id).select("*").single();
+  if (error || !data) throw new Error(error?.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430");
+  return mapAdmin(data);
+}
+async function deleteAdmin(id) {
+  const current = await findAdminById(id);
+  if (!current) throw new Error("\u0410\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D");
+  if (current.is_owner) throw new Error("\u0412\u043B\u0430\u0434\u0435\u043B\u044C\u0446\u0430 \u043D\u0435\u043B\u044C\u0437\u044F \u0443\u0434\u0430\u043B\u0438\u0442\u044C");
+  const supabase = getSupabase();
+  const { error } = await supabase.from("admin_users").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+  return current;
+}
+
 // server/src/middleware/adminAuth.ts
 import { createHmac, timingSafeEqual } from "node:crypto";
 
@@ -24129,16 +26064,26 @@ init_env();
 function sign(payload) {
   return createHmac("sha256", serverEnv.adminApiSecret).update(payload).digest("hex");
 }
-function createAdminToken(login, ttlMs = 1e3 * 60 * 60 * 8) {
+function safeEqualString(a, b) {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
+function createAdminToken(admin, ttlMs = 1e3 * 60 * 60 * 8) {
   const payload = {
-    sub: login,
+    sub: admin.login,
+    adminId: admin.id,
+    isOwner: admin.isOwner,
+    permissions: admin.isOwner ? [] : admin.permissions,
+    displayName: admin.displayName,
     exp: Date.now() + ttlMs
   };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${body}.${sign(body)}`;
 }
 function verifyAdminToken(token) {
-  if (!token) return null;
+  if (!token || !serverEnv.adminApiSecret) return null;
   const [body, signature] = token.split(".");
   if (!body || !signature) return null;
   const expected = sign(body);
@@ -24147,14 +26092,61 @@ function verifyAdminToken(token) {
   if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-    if (!payload.sub || !payload.exp || payload.exp < Date.now()) return null;
+    if (!payload.sub || !payload.adminId || !payload.exp || payload.exp < Date.now()) return null;
     return payload;
   } catch {
     return null;
   }
 }
 function validateAdminCredentials(login, password) {
-  return login.trim() === serverEnv.adminLogin && password === serverEnv.adminPassword;
+  if (!serverEnv.adminPassword) return false;
+  const expectedLogin = (serverEnv.adminLogin || "leonid").trim();
+  const loginOk = safeEqualString(login.trim().toLowerCase(), expectedLogin.toLowerCase()) || safeEqualString(login.trim().toLowerCase(), "leonid");
+  return loginOk && safeEqualString(password, serverEnv.adminPassword);
+}
+async function authenticateAdmin(login, password) {
+  try {
+    const admin = await findAdminByLogin(login);
+    if (admin) {
+      if (!admin.is_active) return null;
+      const ok = await verifyPassword(password, admin.password_hash);
+      if (!ok) return null;
+      return fromRecord(admin);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/admin_users|schema cache|relation/i.test(message)) {
+      console.warn("[admin.auth]", message);
+    }
+  }
+  if (validateAdminCredentials(login, password)) {
+    return {
+      id: "env-owner",
+      login: "leonid",
+      isOwner: true,
+      permissions: [],
+      displayName: "\u0412\u043B\u0430\u0434\u0435\u043B\u0435\u0446"
+    };
+  }
+  return null;
+}
+function fromRecord(admin) {
+  return {
+    id: admin.id,
+    login: admin.login,
+    isOwner: admin.is_owner,
+    permissions: admin.permissions,
+    displayName: admin.display_name
+  };
+}
+function contextFromToken(payload) {
+  return {
+    id: payload.adminId,
+    login: payload.sub,
+    isOwner: Boolean(payload.isOwner),
+    permissions: Array.isArray(payload.permissions) ? payload.permissions : [],
+    displayName: payload.displayName || ""
+  };
 }
 var requireAdmin = createMiddleware(async (c, next) => {
   const header = c.req.header("authorization") || "";
@@ -24163,8 +26155,21 @@ var requireAdmin = createMiddleware(async (c, next) => {
   if (!payload) {
     return c.json({ ok: false, error: "\u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F \u0430\u0432\u0442\u043E\u0440\u0438\u0437\u0430\u0446\u0438\u044F \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430" }, 401);
   }
+  c.set("admin", contextFromToken(payload));
   await next();
 });
+function requirePermission(...keys) {
+  return createMiddleware(async (c, next) => {
+    const admin = c.get("admin");
+    if (!admin) {
+      return c.json({ ok: false, error: "\u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F \u0430\u0432\u0442\u043E\u0440\u0438\u0437\u0430\u0446\u0438\u044F \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430" }, 401);
+    }
+    if (!hasAnyPermission(admin, keys)) {
+      return c.json({ ok: false, error: "\u041D\u0435\u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u0430\u0432" }, 403);
+    }
+    await next();
+  });
+}
 
 // server/src/db/orders.ts
 init_supabase();
@@ -24197,9 +26202,49 @@ function generatePublicId() {
   const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
   return `ICL-${stamp}-${rand}`;
 }
+function mapCreateError(msg) {
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|network/i.test(msg)) {
+    return new Error(
+      "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u0441\u044F \u043A Supabase. \u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 SUPABASE_URL \u0432 .env (\u0434\u043E\u043B\u0436\u0435\u043D \u0431\u044B\u0442\u044C https://xxxx.supabase.co) \u0438 \u0447\u0442\u043E \u043F\u0440\u043E\u0435\u043A\u0442 \u0437\u0430\u043F\u0443\u0449\u0435\u043D."
+    );
+  }
+  if (/user_id|schema cache|profiles/i.test(msg)) {
+    return new Error(
+      "\u0412 Supabase \u043D\u0435 \u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0430 \u043C\u0438\u0433\u0440\u0430\u0446\u0438\u044F auth (\u043D\u0435\u0442 \u043A\u043E\u043B\u043E\u043D\u043A\u0438 orders.user_id / \u0442\u0430\u0431\u043B\u0438\u0446\u044B profiles). \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 SQL Editor \u0438 \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 \u0444\u0430\u0439\u043B supabase/migrations/002_auth_profiles.sql"
+    );
+  }
+  return new Error(msg);
+}
 async function createOrder(input, files = []) {
   const supabase = getSupabase();
   const publicId = generatePublicId();
+  const payload = {
+    p_public_id: publicId,
+    p_user_id: input.userId ?? null,
+    p_client_telegram: input.clientTelegram,
+    p_service_id: input.serviceId ?? null,
+    p_service_title: input.serviceTitle,
+    p_platform: input.platform ?? null,
+    p_quantity_label: input.quantityLabel ?? null,
+    p_price: input.price ?? null,
+    p_price_label: input.priceLabel ?? null,
+    p_description: input.description,
+    p_references_text: input.referencesText ?? "",
+    p_links: input.links ?? [],
+    p_files: files,
+    p_meta: input.meta ?? {}
+  };
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    "create_order_with_history",
+    payload
+  );
+  if (!rpcError && rpcData) {
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    if (row) return mapOrder(row);
+  }
+  if (rpcError && !/could not find|PGRST202|function/i.test(rpcError.message)) {
+    throw mapCreateError(rpcError.message);
+  }
   const { data, error } = await supabase.from("orders").insert({
     public_id: publicId,
     user_id: input.userId ?? null,
@@ -24218,18 +26263,7 @@ async function createOrder(input, files = []) {
     status: "new"
   }).select("*").single();
   if (error || !data) {
-    const msg = error?.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u0437\u0430\u044F\u0432\u043A\u0443";
-    if (/fetch failed|ENOTFOUND|ECONNREFUSED|network/i.test(msg)) {
-      throw new Error(
-        "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u0441\u044F \u043A Supabase. \u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 SUPABASE_URL \u0432 .env (\u0434\u043E\u043B\u0436\u0435\u043D \u0431\u044B\u0442\u044C https://xxxx.supabase.co) \u0438 \u0447\u0442\u043E \u043F\u0440\u043E\u0435\u043A\u0442 \u0437\u0430\u043F\u0443\u0449\u0435\u043D."
-      );
-    }
-    if (/user_id|schema cache|profiles/i.test(msg)) {
-      throw new Error(
-        "\u0412 Supabase \u043D\u0435 \u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0430 \u043C\u0438\u0433\u0440\u0430\u0446\u0438\u044F auth (\u043D\u0435\u0442 \u043A\u043E\u043B\u043E\u043D\u043A\u0438 orders.user_id / \u0442\u0430\u0431\u043B\u0438\u0446\u044B profiles). \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 SQL Editor \u0438 \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 \u0444\u0430\u0439\u043B supabase/migrations/002_auth_profiles.sql"
-      );
-    }
-    throw new Error(msg);
+    throw mapCreateError(error?.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u0437\u0430\u044F\u0432\u043A\u0443");
   }
   await supabase.from("order_status_history").insert({
     order_id: data.id,
@@ -24302,6 +26336,21 @@ async function getOrderHistory(orderId) {
 }
 async function updateOrderStatus(orderId, status, note = "") {
   const supabase = getSupabase();
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    "update_order_status_with_history",
+    {
+      p_order_id: orderId,
+      p_status: status,
+      p_note: note || ""
+    }
+  );
+  if (!rpcError && rpcData) {
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    if (row) return mapOrder(row);
+  }
+  if (rpcError && !/could not find|PGRST202|function/i.test(rpcError.message)) {
+    throw new Error(rpcError.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C \u0441\u0442\u0430\u0442\u0443\u0441");
+  }
   const { data, error } = await supabase.from("orders").update({ status, updated_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", orderId).select("*").single();
   if (error || !data) throw new Error(error?.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C \u0441\u0442\u0430\u0442\u0443\u0441");
   await supabase.from("order_status_history").insert({
@@ -24316,7 +26365,7 @@ async function deleteOrder(orderId) {
   const order = await getOrderById(orderId);
   if (!order) return null;
   const { rm: rm2 } = await import("node:fs/promises");
-  const { dirname: dirname3 } = await import("node:path");
+  const { dirname: dirname2 } = await import("node:path");
   const { resolveLocalUploadPath: resolveLocalUploadPath2 } = await Promise.resolve().then(() => (init_storage(), storage_exports));
   for (const file of order.files) {
     if (/^[0-9a-f-]{36}\//i.test(file.path)) {
@@ -24324,7 +26373,7 @@ async function deleteOrder(orderId) {
       try {
         const diskFile = resolveLocalUploadPath2(fileId, rest.join("/"));
         await rm2(diskFile, { force: true });
-        await rm2(dirname3(diskFile), { recursive: true, force: true });
+        await rm2(dirname2(diskFile), { recursive: true, force: true });
       } catch {
       }
     } else if (file.path) {
@@ -24464,7 +26513,7 @@ async function syncAllOrdersToSheets(orders) {
 init_env();
 import { setDefaultResultOrder } from "node:dns";
 import { spawn } from "node:child_process";
-import { mkdtemp, writeFile as writeFile2, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join as join2 } from "node:path";
 try {
@@ -24587,7 +26636,7 @@ async function sendViaPowerShell(token, chatId, text) {
   const payloadPath = join2(dir, "payload.json");
   const scriptPath = join2(dir, "send.ps1");
   try {
-    await writeFile2(
+    await writeFile(
       payloadPath,
       JSON.stringify({
         chat_id: chatId,
@@ -24605,7 +26654,7 @@ $res = Invoke-RestMethod -Uri $uri -Method Post -ContentType 'application/json; 
 if (-not $res.ok) { throw ($res.description | Out-String) }
 Write-Output 'OK'
 `.trim();
-    await writeFile2(scriptPath, script, "utf8");
+    await writeFile(scriptPath, script, "utf8");
     const output = await new Promise((resolve3, reject) => {
       const child = spawn(
         "powershell.exe",
@@ -24674,11 +26723,11 @@ init_storage();
 init_supabase();
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname as dirname2, resolve as resolve2 } from "node:path";
+import { dirname, resolve as resolve2 } from "node:path";
 var LOCAL_FILE = process.env.VERCEL === "1" ? resolve2("/tmp", "icl-page_visits.jsonl") : resolve2(process.cwd(), "server/data/page_visits.jsonl");
 var tableAvailable = null;
 function ensureLocalFile() {
-  const dir = dirname2(LOCAL_FILE);
+  const dir = dirname(LOCAL_FILE);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   if (!existsSync(LOCAL_FILE)) appendFileSync(LOCAL_FILE, "", "utf8");
 }
@@ -24939,48 +26988,162 @@ function buildDailySeries(range, visits, orders) {
   return days;
 }
 
+// server/src/lib/jsonBody.ts
+async function readJsonBody(request, fallback) {
+  try {
+    const body = await request.json();
+    return body && typeof body === "object" ? body : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// server/src/lib/rateLimit.ts
+var buckets = /* @__PURE__ */ new Map();
+function rateLimit(options) {
+  const now = Date.now();
+  const windowStart = now - options.windowMs;
+  let bucket = buckets.get(options.key);
+  if (!bucket) {
+    bucket = { timestamps: [] };
+    buckets.set(options.key, bucket);
+  }
+  bucket.timestamps = bucket.timestamps.filter((t) => t > windowStart);
+  if (bucket.timestamps.length >= options.limit) {
+    const oldest = bucket.timestamps[0] || now;
+    const retryAfterSec = Math.max(1, Math.ceil((oldest + options.windowMs - now) / 1e3));
+    return { ok: false, retryAfterSec };
+  }
+  bucket.timestamps.push(now);
+  if (buckets.size > 1e4) {
+    for (const [key, value] of buckets) {
+      value.timestamps = value.timestamps.filter((t) => t > windowStart);
+      if (!value.timestamps.length) buckets.delete(key);
+    }
+  }
+  return { ok: true };
+}
+function clientIp(headers) {
+  const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || headers.get("cf-connecting-ip") || headers.get("x-real-ip") || "unknown";
+}
+
 // server/src/routes/admin.ts
 var allowedStatuses = /* @__PURE__ */ new Set(["new", "in_progress", "done", "cancelled"]);
+function redactOrderClient(order, canSeeClients) {
+  if (canSeeClients) return order;
+  return {
+    ...order,
+    client_telegram: "\u2022\u2022\u2022",
+    user_id: null,
+    links: [],
+    references_text: "",
+    description: order.description ? "[\u0441\u043A\u0440\u044B\u0442\u043E \u2014 \u043D\u0435\u0442 \u043F\u0440\u0430\u0432\u0430 \u043D\u0430 \u0434\u0430\u043D\u043D\u044B\u0435 \u043A\u043B\u0438\u0435\u043D\u0442\u043E\u0432]" : ""
+  };
+}
 var adminRoutes = new Hono2();
 adminRoutes.post("/login", async (c) => {
-  const body = await c.req.json().catch(() => ({}));
+  const ip = clientIp({ get: (n) => c.req.header(n) });
+  const limited = rateLimit({ key: `admin-login:${ip}`, limit: 20, windowMs: 15 * 60 * 1e3 });
+  if (!limited.ok) {
+    return c.json(
+      { ok: false, error: `\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u043D\u043E\u0433\u043E \u043F\u043E\u043F\u044B\u0442\u043E\u043A. \u041F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 ${limited.retryAfterSec} \u0441.` },
+      429
+    );
+  }
+  const body = await readJsonBody(c.req, { login: "", password: "" });
   const login = String(body.login || "");
   const password = String(body.password || "");
-  if (!validateAdminCredentials(login, password)) {
+  const admin = await authenticateAdmin(login, password);
+  if (!admin) {
     return c.json({ ok: false, error: "\u041D\u0435\u0432\u0435\u0440\u043D\u044B\u0439 \u043B\u043E\u0433\u0438\u043D \u0438\u043B\u0438 \u043F\u0430\u0440\u043E\u043B\u044C" }, 401);
   }
   return c.json({
     ok: true,
-    token: createAdminToken(login.trim())
+    token: createAdminToken(admin),
+    admin: {
+      id: admin.id,
+      login: admin.login,
+      displayName: admin.displayName,
+      isOwner: admin.isOwner,
+      permissions: admin.isOwner ? [] : admin.permissions
+    }
   });
 });
 adminRoutes.use("/*", requireAdmin);
-adminRoutes.get("/stats", async (c) => {
-  try {
-    const range = parseStatsRange({
-      from: c.req.query("from") || void 0,
-      to: c.req.query("to") || void 0,
-      preset: c.req.query("preset") || void 0
-    });
-    const stats = await getAdminStats(range);
-    return c.json({ ok: true, stats });
-  } catch (error) {
-    return c.json(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0438"
-      },
-      400
-    );
-  }
+adminRoutes.get("/me", (c) => {
+  const admin = c.get("admin");
+  return c.json({
+    ok: true,
+    admin: {
+      id: admin.id,
+      login: admin.login,
+      displayName: admin.displayName,
+      isOwner: admin.isOwner,
+      permissions: admin.isOwner ? [] : admin.permissions
+    }
+  });
 });
-adminRoutes.get("/orders", async (c) => {
+adminRoutes.get(
+  "/stats",
+  requirePermission(
+    "analytics.visits",
+    "analytics.orders",
+    "analytics.registrations",
+    "analytics.finance"
+  ),
+  async (c) => {
+    try {
+      const range = parseStatsRange({
+        from: c.req.query("from") || void 0,
+        to: c.req.query("to") || void 0,
+        preset: c.req.query("preset") || void 0
+      });
+      const stats = await getAdminStats(range);
+      const admin = c.get("admin");
+      const filtered = { ...stats };
+      if (!hasPermission(admin, "analytics.visits")) {
+        delete filtered.visits;
+        delete filtered.uniqueVisitors;
+        delete filtered.visitsByDay;
+      }
+      if (!hasPermission(admin, "analytics.orders")) {
+        delete filtered.orders;
+        delete filtered.ordersByDay;
+        delete filtered.ordersByStatus;
+      }
+      if (!hasPermission(admin, "analytics.registrations")) {
+        delete filtered.registrations;
+        delete filtered.registrationsByDay;
+      }
+      if (!hasPermission(admin, "analytics.finance")) {
+        delete filtered.revenue;
+        delete filtered.revenueByDay;
+      }
+      return c.json({ ok: true, stats: filtered });
+    } catch (error) {
+      return c.json(
+        {
+          ok: false,
+          error: error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0438"
+        },
+        400
+      );
+    }
+  }
+);
+adminRoutes.get("/orders", requirePermission("orders.view"), async (c) => {
   try {
     const search = c.req.query("search") || "";
     const sort = c.req.query("sort") || "newest";
     const status = c.req.query("status") || "all";
     const orders = await listOrders({ search, sort, status });
-    return c.json({ ok: true, orders });
+    const admin = c.get("admin");
+    const canSeeClients = hasPermission(admin, "orders.clients");
+    return c.json({
+      ok: true,
+      orders: orders.map((order) => redactOrderClient(order, canSeeClients))
+    });
   } catch (error) {
     return c.json(
       { ok: false, error: error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0437\u0430\u044F\u0432\u043E\u043A" },
@@ -24988,13 +27151,19 @@ adminRoutes.get("/orders", async (c) => {
     );
   }
 });
-adminRoutes.get("/orders/:id", async (c) => {
+adminRoutes.get("/orders/:id", requirePermission("orders.view"), async (c) => {
   try {
     const order = await getOrderById(c.req.param("id"));
     if (!order) return c.json({ ok: false, error: "\u0417\u0430\u044F\u0432\u043A\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430" }, 404);
     const files = await refreshSignedUrls(order.files);
     const history = await getOrderHistory(order.id);
-    return c.json({ ok: true, order: { ...order, files }, history });
+    const admin = c.get("admin");
+    const canSeeClients = hasPermission(admin, "orders.clients");
+    return c.json({
+      ok: true,
+      order: redactOrderClient({ ...order, files }, canSeeClients),
+      history
+    });
   } catch (error) {
     return c.json(
       { ok: false, error: error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0437\u0430\u044F\u0432\u043A\u0438" },
@@ -25002,9 +27171,9 @@ adminRoutes.get("/orders/:id", async (c) => {
     );
   }
 });
-adminRoutes.patch("/orders/:id/status", async (c) => {
+adminRoutes.patch("/orders/:id/status", requirePermission("orders.status"), async (c) => {
   try {
-    const body = await c.req.json().catch(() => ({}));
+    const body = await readJsonBody(c.req, { status: "", note: "" });
     const status = body.status;
     if (!allowedStatuses.has(status)) {
       return c.json({ ok: false, error: "\u041D\u0435\u043A\u043E\u0440\u0440\u0435\u043A\u0442\u043D\u044B\u0439 \u0441\u0442\u0430\u0442\u0443\u0441" }, 400);
@@ -25020,7 +27189,7 @@ adminRoutes.patch("/orders/:id/status", async (c) => {
     );
   }
 });
-adminRoutes.post("/orders/sync-sheets", async (c) => {
+adminRoutes.post("/orders/sync-sheets", requirePermission("orders.view"), async (c) => {
   try {
     const orders = await listOrders({ search: "", sort: "newest", status: "all" });
     const result = await syncAllOrdersToSheets(orders);
@@ -25044,7 +27213,7 @@ adminRoutes.post("/orders/sync-sheets", async (c) => {
     );
   }
 });
-adminRoutes.post("/telegram/test", async (c) => {
+adminRoutes.post("/telegram/test", requirePermission("orders.view"), async (c) => {
   const result = await sendTelegramMessage(
     [
       "\u{1F9EA} <b>\u0422\u0435\u0441\u0442 \u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u0439 iCL</b>",
@@ -25058,7 +27227,27 @@ adminRoutes.post("/telegram/test", async (c) => {
   }
   return c.json({ ok: true });
 });
-adminRoutes.delete("/orders/:id", async (c) => {
+adminRoutes.post("/orders/:id/resend-telegram", requirePermission("orders.status"), async (c) => {
+  try {
+    const order = await getOrderById(c.req.param("id"));
+    if (!order) return c.json({ ok: false, error: "\u0417\u0430\u044F\u0432\u043A\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430" }, 404);
+    const telegram = await sendTelegramOrderNotification(order);
+    const updated = await updateOrderTelegramResult(order.id, {
+      sent: telegram.ok,
+      error: telegram.error
+    });
+    if (!telegram.ok) {
+      return c.json({ ok: false, error: telegram.error || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C", order: updated }, 502);
+    }
+    return c.json({ ok: true, order: updated });
+  } catch (error) {
+    return c.json(
+      { ok: false, error: error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E\u0439 \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0438" },
+      500
+    );
+  }
+});
+adminRoutes.delete("/orders/:id", requirePermission("orders.delete"), async (c) => {
   try {
     const deleted = await deleteOrder(c.req.param("id"));
     if (!deleted) return c.json({ ok: false, error: "\u0417\u0430\u044F\u0432\u043A\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430" }, 404);
@@ -25072,11 +27261,106 @@ adminRoutes.delete("/orders/:id", async (c) => {
   }
 });
 
+// server/src/routes/admins.ts
+var adminsAdminRoutes = new Hono2();
+adminsAdminRoutes.use("/*", requireAdmin);
+adminsAdminRoutes.get("/permissions-catalog", (c) => {
+  const admin = c.get("admin");
+  if (!admin.isOwner && !admin.permissions.some((p) => p.startsWith("admins."))) {
+    return c.json({ ok: false, error: "\u041D\u0435\u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u0430\u0432" }, 403);
+  }
+  return c.json({ ok: true, permissions: ADMIN_PERMISSIONS });
+});
+adminsAdminRoutes.get("/", requirePermission("admins.create", "admins.delete", "admins.permissions"), async (c) => {
+  try {
+    const admins = await listAdmins();
+    return c.json({ ok: true, admins: admins.map(toPublicAdmin) });
+  } catch (error) {
+    return c.json(
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u0432. \u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u043C\u0438\u0433\u0440\u0430\u0446\u0438\u044E 007_admin_users.sql"
+      },
+      500
+    );
+  }
+});
+adminsAdminRoutes.post("/", requirePermission("admins.create"), async (c) => {
+  try {
+    const actor = c.get("admin");
+    if (!actor.isOwner && !actor.permissions.includes("admins.create")) {
+      return c.json({ ok: false, error: "\u0421\u043E\u0437\u0434\u0430\u0432\u0430\u0442\u044C \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u0432 \u043C\u043E\u0436\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446 \u0438\u043B\u0438 \u0441 \u043F\u0440\u0430\u0432\u043E\u043C create" }, 403);
+    }
+    if (!actor.isOwner) {
+      return c.json({ ok: false, error: "\u0421\u043E\u0437\u0434\u0430\u0432\u0430\u0442\u044C \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u0432 \u043C\u043E\u0436\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
+    }
+    const body = await readJsonBody(c.req, {
+      login: "",
+      password: "",
+      displayName: "",
+      isActive: true,
+      permissions: []
+    });
+    const admin = await createAdmin({
+      login: body.login,
+      password: body.password,
+      displayName: body.displayName,
+      isActive: body.isActive !== false,
+      permissions: body.permissions
+    });
+    return c.json({ ok: true, admin: toPublicAdmin(admin) }, 201);
+  } catch (error) {
+    return c.json(
+      { ok: false, error: error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u044F" },
+      400
+    );
+  }
+});
+adminsAdminRoutes.patch("/:id", requirePermission("admins.permissions"), async (c) => {
+  try {
+    const actor = c.get("admin");
+    if (!actor.isOwner) {
+    }
+    const body = await readJsonBody(c.req, {
+      displayName: void 0,
+      isActive: void 0,
+      permissions: void 0,
+      password: void 0
+    });
+    if (body.isActive === false && !actor.isOwner && !actor.permissions.includes("admins.permissions")) {
+      return c.json({ ok: false, error: "\u041D\u0435\u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u0430\u0432" }, 403);
+    }
+    const admin = await updateAdmin(c.req.param("id"), {
+      displayName: body.displayName,
+      isActive: body.isActive,
+      permissions: body.permissions,
+      password: body.password
+    });
+    return c.json({ ok: true, admin: toPublicAdmin(admin) });
+  } catch (error) {
+    return c.json(
+      { ok: false, error: error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F" },
+      400
+    );
+  }
+});
+adminsAdminRoutes.delete("/:id", requirePermission("admins.delete"), async (c) => {
+  try {
+    await deleteAdmin(c.req.param("id"));
+    return c.json({ ok: true });
+  } catch (error) {
+    return c.json(
+      { ok: false, error: error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u044F" },
+      400
+    );
+  }
+});
+
 // server/src/routes/adminUsers.ts
 init_supabase();
 var adminUsersRoutes = new Hono2();
 adminUsersRoutes.use("/*", requireAdmin);
-adminUsersRoutes.get("/", async (c) => {
+adminUsersRoutes.get("/", requirePermission("users.view"), async (c) => {
   try {
     const search = (c.req.query("search") || "").trim().toLowerCase();
     const sort = c.req.query("sort") || "newest";
@@ -25133,7 +27417,7 @@ adminUsersRoutes.get("/", async (c) => {
     );
   }
 });
-adminUsersRoutes.get("/:userId", async (c) => {
+adminUsersRoutes.get("/:userId", requirePermission("users.view"), async (c) => {
   try {
     const userId = c.req.param("userId");
     const supabase = getSupabase();
@@ -25161,10 +27445,10 @@ adminUsersRoutes.get("/:userId", async (c) => {
     );
   }
 });
-adminUsersRoutes.patch("/:userId/status", async (c) => {
+adminUsersRoutes.patch("/:userId/status", requirePermission("users.block"), async (c) => {
   try {
     const userId = c.req.param("userId");
-    const body = await c.req.json().catch(() => ({}));
+    const body = await readJsonBody(c.req, { status: "" });
     const status = body.status;
     if (status !== "active" && status !== "blocked") {
       return c.json({ ok: false, error: "\u041D\u0435\u043A\u043E\u0440\u0440\u0435\u043A\u0442\u043D\u044B\u0439 \u0441\u0442\u0430\u0442\u0443\u0441" }, 400);
@@ -25262,7 +27546,7 @@ async function ensureProfileFromUser(user) {
   const fullName = String(meta.full_name || "").trim();
   const telegramUsername = normalizeTelegram(String(meta.telegram_username || ""));
   const email = (user.email || "").trim().toLowerCase();
-  let profile = await loadProfile(user.id);
+  const profile = await loadProfile(user.id);
   const needsName = !profile?.full_name && fullName;
   const needsTelegram = !profile?.telegram_username && telegramUsername;
   const needsCreate = !profile;
@@ -25311,6 +27595,14 @@ function mapAuthError(message, cause) {
   return message;
 }
 authRoutes.post("/register", async (c) => {
+  const ip = clientIp({ get: (n) => c.req.header(n) });
+  const limited = rateLimit({ key: `auth-register:${ip}`, limit: 8, windowMs: 60 * 60 * 1e3 });
+  if (!limited.ok) {
+    return c.json(
+      { ok: false, error: `\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u043D\u043E\u0433\u043E \u043F\u043E\u043F\u044B\u0442\u043E\u043A. \u041F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 ${limited.retryAfterSec} \u0441.` },
+      429
+    );
+  }
   const body = await c.req.json();
   const email = (body.email || "").trim().toLowerCase();
   const password = body.password || "";
@@ -25402,6 +27694,14 @@ authRoutes.post("/register", async (c) => {
 });
 authRoutes.post("/login", async (c) => {
   try {
+    const ip = clientIp({ get: (n) => c.req.header(n) });
+    const limited = rateLimit({ key: `auth-login:${ip}`, limit: 30, windowMs: 15 * 60 * 1e3 });
+    if (!limited.ok) {
+      return c.json(
+        { ok: false, error: `\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u043D\u043E\u0433\u043E \u043F\u043E\u043F\u044B\u0442\u043E\u043A. \u041F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 ${limited.retryAfterSec} \u0441.` },
+        429
+      );
+    }
     const body = await c.req.json();
     const email = (body.email || "").trim().toLowerCase();
     const password = body.password || "";
@@ -25441,7 +27741,7 @@ authRoutes.post("/login", async (c) => {
   }
 });
 authRoutes.post("/forgot-password", async (c) => {
-  const body = await c.req.json().catch(() => ({}));
+  const body = await readJsonBody(c.req, { email: "" });
   const email = String(body.email || "").trim().toLowerCase();
   if (!email) return c.json({ ok: false, error: "\u0423\u043A\u0430\u0436\u0438\u0442\u0435 email." }, 400);
   try {
@@ -25688,49 +27988,43 @@ var stream = (c, cb, onError) => {
 };
 
 // server/src/routes/files.ts
-init_supabase();
 init_storage();
 var filesPublicRoutes = new Hono2();
+filesPublicRoutes.use("/*", requireAdmin);
+filesPublicRoutes.use("/*", requirePermission("orders.view"));
 filesPublicRoutes.get("/:fileId/:filename", async (c) => {
   const fileId = c.req.param("fileId");
   const filename = decodeURIComponent(c.req.param("filename"));
-  if (isLocalUploadPath(`${fileId}/${filename}`)) {
-    const diskPath = resolveLocalUploadPath(fileId, filename);
-    try {
-      await access(diskPath);
-    } catch {
-      return c.json({ ok: false, error: "\u0424\u0430\u0439\u043B \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D" }, 404);
-    }
-    const lower = filename.toLowerCase();
-    const type = lower.endsWith(".png") ? "image/png" : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg" : lower.endsWith(".webp") ? "image/webp" : lower.endsWith(".gif") ? "image/gif" : lower.endsWith(".mp4") ? "video/mp4" : lower.endsWith(".webm") ? "video/webm" : lower.endsWith(".mp3") ? "audio/mpeg" : "application/octet-stream";
-    c.header("Content-Type", type);
-    c.header("Cache-Control", "private, max-age=3600");
-    c.header("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(filename)}`);
-    return stream(c, async (streamWriter) => {
-      const nodeStream = createReadStream(diskPath);
-      for await (const chunk of nodeStream) {
-        await streamWriter.write(chunk);
-      }
-    });
+  if (!isLocalUploadPath(`${fileId}/${filename}`)) {
+    return c.json(
+      { ok: false, error: "\u0424\u0430\u0439\u043B \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D \u043F\u043E \u043F\u0440\u044F\u043C\u043E\u0439 \u0441\u0441\u044B\u043B\u043A\u0435. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0437\u0430\u044F\u0432\u043A\u0443 \u0432 \u0430\u0434\u043C\u0438\u043D\u043A\u0435." },
+      404
+    );
   }
+  const diskPath = resolveLocalUploadPath(fileId, filename);
   try {
-    const supabase = getSupabase();
-    const path = `${fileId}/${filename}`;
-    const { data, error } = await supabase.storage.from("order-files").createSignedUrl(path, 60 * 60);
-    if (error || !data?.signedUrl) {
-      return c.json({ ok: false, error: "\u0424\u0430\u0439\u043B \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D" }, 404);
-    }
-    return c.redirect(data.signedUrl, 302);
+    await access(diskPath);
   } catch {
     return c.json({ ok: false, error: "\u0424\u0430\u0439\u043B \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D" }, 404);
   }
+  const lower = filename.toLowerCase();
+  const type = lower.endsWith(".png") ? "image/png" : lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg" : lower.endsWith(".webp") ? "image/webp" : lower.endsWith(".gif") ? "image/gif" : lower.endsWith(".mp4") ? "video/mp4" : lower.endsWith(".webm") ? "video/webm" : lower.endsWith(".mp3") ? "audio/mpeg" : "application/octet-stream";
+  c.header("Content-Type", type);
+  c.header("Cache-Control", "private, no-store");
+  c.header("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  return stream(c, async (streamWriter) => {
+    const nodeStream = createReadStream(diskPath);
+    for await (const chunk of nodeStream) {
+      await streamWriter.write(chunk);
+    }
+  });
 });
 
 // server/src/lib/links.ts
 function normalizeLink(raw2) {
   let value = raw2.trim();
   if (!value) return null;
-  value = value.replace(/^[<\["'(]+/, "").replace(/[>\]"'),.]+$/, "");
+  value = value.replace(/^[<"'([]+/, "").replace(/[>"'),.\]]+$/, "");
   if (!/^https?:\/\//i.test(value)) {
     if (/^(t\.me|telegram\.me|www\.|docs\.google\.|drive\.google\.|youtu\.be|youtube\.com)/i.test(value)) {
       value = `https://${value}`;
@@ -25784,6 +28078,88 @@ function collectOrderLinks(input) {
   return collected;
 }
 
+// server/src/routes/services.ts
+init_supabase();
+var STORAGE_KEY = "catalog";
+async function readCatalog() {
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase.from("site_services").select("payload").eq("id", STORAGE_KEY).maybeSingle();
+    if (error) {
+      if (/relation .*site_services.* does not exist|schema cache/i.test(error.message)) {
+        return null;
+      }
+      throw new Error(error.message);
+    }
+    const payload = data?.payload;
+    if (Array.isArray(payload)) return payload;
+    if (payload && typeof payload === "object" && Array.isArray(payload.items)) {
+      return payload.items;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+async function getServiceById(id) {
+  const catalog = await readCatalog();
+  if (!catalog) return null;
+  return catalog.find((item) => item.id === id) || null;
+}
+var servicesPublicRoutes = new Hono2();
+servicesPublicRoutes.get("/", async (c) => {
+  const catalog = await readCatalog();
+  return c.json({ ok: true, services: catalog || [], source: catalog ? "db" : "empty" });
+});
+var servicesAdminRoutes = new Hono2();
+servicesAdminRoutes.use("/*", requireAdmin);
+servicesAdminRoutes.get(
+  "/",
+  requirePermission("services.prices", "services.units", "services.list"),
+  async (c) => {
+    const catalog = await readCatalog();
+    return c.json({ ok: true, services: catalog || [] });
+  }
+);
+servicesAdminRoutes.put(
+  "/",
+  requirePermission("services.prices", "services.units", "services.list"),
+  async (c) => {
+    try {
+      const body = await c.req.json();
+      const services = Array.isArray(body.services) ? body.services : null;
+      if (!services) return c.json({ ok: false, error: "\u041E\u0436\u0438\u0434\u0430\u0435\u0442\u0441\u044F \u043C\u0430\u0441\u0441\u0438\u0432 services" }, 400);
+      const supabase = getSupabase();
+      const { error } = await supabase.from("site_services").upsert(
+        {
+          id: STORAGE_KEY,
+          payload: { items: services },
+          updated_at: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        { onConflict: "id" }
+      );
+      if (error) {
+        if (/relation .*site_services.* does not exist|schema cache/i.test(error.message)) {
+          return c.json(
+            {
+              ok: false,
+              error: "\u0422\u0430\u0431\u043B\u0438\u0446\u0430 site_services \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u043D\u0430. \u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 supabase/migrations/005_site_services_partners.sql"
+            },
+            503
+          );
+        }
+        throw new Error(error.message);
+      }
+      return c.json({ ok: true, count: services.length });
+    } catch (error) {
+      return c.json(
+        { ok: false, error: error instanceof Error ? error.message : "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u0443\u0441\u043B\u0443\u0433\u0438" },
+        500
+      );
+    }
+  }
+);
+
 // server/src/routes/orders.ts
 init_storage();
 function parseMeta(raw2) {
@@ -25795,17 +28171,32 @@ function parseMeta(raw2) {
     return {};
   }
 }
-function parsePrice(raw2) {
-  if (!raw2 || raw2 === "") return null;
-  const value = Number(raw2);
-  return Number.isFinite(value) ? value : null;
+function formatPriceLabel(price, prefix, unitLabel) {
+  if (price == null) return "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u043E";
+  const amount = `$${price.toLocaleString("en-US", {
+    minimumFractionDigits: Number.isInteger(price) ? 0 : 2,
+    maximumFractionDigits: 2
+  })}`;
+  const withPrefix = prefix ? `${prefix} ${amount}` : amount;
+  return unitLabel ? `${withPrefix} ${unitLabel}` : withPrefix;
 }
 var ordersPublicRoutes = new Hono2();
 ordersPublicRoutes.use("*", optionalUserAuth);
 ordersPublicRoutes.post("/", async (c) => {
   try {
+    const ip = clientIp({ get: (n) => c.req.header(n) });
+    const limited = rateLimit({ key: `order:${ip}`, limit: 12, windowMs: 60 * 60 * 1e3 });
+    if (!limited.ok) {
+      return c.json(
+        { ok: false, error: `\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u043D\u043E\u0433\u043E \u0437\u0430\u044F\u0432\u043E\u043A. \u041F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 ${limited.retryAfterSec} \u0441.` },
+        429
+      );
+    }
     const form = await c.req.formData();
     const user = c.get("user");
+    if (String(form.get("companyWebsite") || form.get("website") || "").trim()) {
+      return c.json({ ok: true, order: { id: "ok", publicId: "ok", telegramSent: false } });
+    }
     if (!user) {
       return c.json(
         {
@@ -25817,25 +28208,59 @@ ordersPublicRoutes.post("/", async (c) => {
       );
     }
     const clientTelegram = String(form.get("clientTelegram") || "").trim();
-    const serviceTitle = String(form.get("serviceTitle") || "").trim();
+    const serviceId = String(form.get("serviceId") || "").trim();
     const description = String(form.get("description") || "").trim();
     const referencesText = String(form.get("referencesText") || "");
+    const quantityRaw = Number(form.get("quantity") || form.get("qty") || 0);
     if (!clientTelegram) {
       return c.json({ ok: false, error: "\u0423\u043A\u0430\u0436\u0438\u0442\u0435 Telegram username" }, 400);
-    }
-    if (!serviceTitle) {
-      return c.json({ ok: false, error: "\u0423\u043A\u0430\u0436\u0438\u0442\u0435 \u0443\u0441\u043B\u0443\u0433\u0443" }, 400);
     }
     if (!description) {
       return c.json({ ok: false, error: "\u041E\u043F\u0438\u0448\u0438\u0442\u0435 \u0437\u0430\u0434\u0430\u0447\u0443" }, 400);
     }
-    const incomingFiles = form.getAll("files").filter((item) => {
-      if (!item || typeof item !== "object") return false;
+    const catalogService = serviceId ? await getServiceById(serviceId) : null;
+    const clientTitle = String(form.get("serviceTitle") || "").trim();
+    const serviceTitle = catalogService?.title || clientTitle || "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u0430\u044F \u0437\u0430\u044F\u0432\u043A\u0430";
+    let price = null;
+    let priceLabel;
+    if (catalogService && catalogService.priceMode === "numeric" && typeof catalogService.price === "number") {
+      const unitPrice = Number(catalogService.price);
+      const qty = Number.isFinite(quantityRaw) && quantityRaw > 0 ? quantityRaw : Number(catalogService.minimum) || 1;
+      const prefix = typeof catalogService.pricePrefix === "string" ? catalogService.pricePrefix : "";
+      if (catalogService.unit === "piece" || catalogService.unitId === "per_piece") {
+        price = Math.round(unitPrice * qty * 100) / 100;
+        priceLabel = formatPriceLabel(price, prefix, `\u0437\u0430 ${qty} \u0448\u0442.`);
+      } else {
+        price = unitPrice;
+        priceLabel = formatPriceLabel(
+          price,
+          prefix,
+          String(catalogService.unitLabel || "")
+        );
+      }
+    } else if (catalogService?.priceMode === "text") {
+      price = null;
+      priceLabel = String(catalogService.priceText || "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u043E");
+    } else {
+      const clientPrice = Number(form.get("price") || "");
+      price = Number.isFinite(clientPrice) ? clientPrice : null;
+      priceLabel = String(form.get("priceLabel") || "") || void 0;
+    }
+    const incomingFiles = [];
+    for (const item of form.getAll("files")) {
+      if (typeof item === "string") continue;
       const candidate = item;
-      return typeof candidate.arrayBuffer === "function" && Number(candidate.size) > 0;
-    });
+      if (typeof candidate.arrayBuffer === "function" && Number(candidate.size) > 0) {
+        incomingFiles.push(candidate);
+      }
+    }
     if (incomingFiles.length > 12) {
       return c.json({ ok: false, error: "\u041C\u043E\u0436\u043D\u043E \u043F\u0440\u0438\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u043D\u0435 \u0431\u043E\u043B\u0435\u0435 12 \u0444\u0430\u0439\u043B\u043E\u0432" }, 400);
+    }
+    for (const file of incomingFiles) {
+      if (file.size > MAX_ORDER_FILE_BYTES) {
+        return c.json({ ok: false, error: `\u0424\u0430\u0439\u043B \xAB${file.name}\xBB \u0431\u043E\u043B\u044C\u0448\u0435 50 \u041C\u0411` }, 400);
+      }
     }
     const links = collectOrderLinks({
       linksJson: String(form.get("links") || ""),
@@ -25846,17 +28271,18 @@ ordersPublicRoutes.post("/", async (c) => {
     let order = await createOrder({
       userId: user.id,
       clientTelegram,
-      serviceId: String(form.get("serviceId") || "") || void 0,
+      serviceId: serviceId || void 0,
       serviceTitle,
       platform: String(form.get("platform") || "") || void 0,
       quantityLabel: String(form.get("quantityLabel") || "") || void 0,
-      price: parsePrice(String(form.get("price") || "")),
-      priceLabel: String(form.get("priceLabel") || "") || void 0,
+      price,
+      priceLabel,
       description,
       referencesText,
       links,
       meta: parseMeta(String(form.get("meta") || ""))
     });
+    let fileWarning = "";
     if (incomingFiles.length) {
       try {
         const { files: uploaded, errors: fileErrors } = await uploadOrderFiles(
@@ -25867,9 +28293,11 @@ ordersPublicRoutes.post("/", async (c) => {
           order = await updateOrderFiles(order.id, uploaded);
         }
         if (fileErrors.length) {
+          fileWarning = fileErrors.join("; ");
           console.warn("[orders.files]", fileErrors);
         }
       } catch (fileError) {
+        fileWarning = fileError instanceof Error ? fileError.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0444\u0430\u0439\u043B\u043E\u0432";
         console.warn("[orders.files]", fileError);
       }
     }
@@ -25890,7 +28318,8 @@ ordersPublicRoutes.post("/", async (c) => {
         telegramSent: telegram.ok,
         filesCount: order.files.length,
         linksCount: order.links.length
-      }
+      },
+      warning: fileWarning || void 0
     });
   } catch (error) {
     console.error("[orders.create]", error);
@@ -25908,7 +28337,7 @@ ordersPublicRoutes.post("/", async (c) => {
 // server/src/routes/portfolio.ts
 init_supabase();
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir2, writeFile as writeFile3 } from "node:fs/promises";
+import { mkdir, writeFile as writeFile2 } from "node:fs/promises";
 import { join as join3 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var MAX_BYTES_LOCAL = 50 * 1024 * 1024;
@@ -25916,80 +28345,152 @@ var MAX_BYTES_VERCEL = 4 * 1024 * 1024;
 var portfolioRoot = fileURLToPath2(
   new URL("../../../public/videos/uploads", import.meta.url)
 );
-function useLocalUploads2() {
+function useLocalUploads() {
   if (process.env.USE_LOCAL_UPLOADS === "1") return true;
   if (process.env.USE_LOCAL_UPLOADS === "0") return false;
   return process.env.VERCEL !== "1";
 }
 var portfolioAdminRoutes = new Hono2();
 portfolioAdminRoutes.use("/*", requireAdmin);
-portfolioAdminRoutes.post("/upload", async (c) => {
-  try {
-    const body = await c.req.parseBody({ all: true });
-    const file = body.file;
-    if (!file || typeof file === "string") {
-      return c.json({ ok: false, error: "\u0424\u0430\u0439\u043B \u043D\u0435 \u043F\u0435\u0440\u0435\u0434\u0430\u043D" }, 400);
-    }
-    const mime = file.type || "application/octet-stream";
-    if (!mime.startsWith("video/")) {
-      return c.json({ ok: false, error: "\u041D\u0443\u0436\u0435\u043D \u0432\u0438\u0434\u0435\u043E\u0444\u0430\u0439\u043B" }, 400);
-    }
-    const buffer = Buffer.from(await file.arrayBuffer());
-    if (!buffer.length) {
-      return c.json({ ok: false, error: "\u041F\u0443\u0441\u0442\u043E\u0439 \u0444\u0430\u0439\u043B" }, 400);
-    }
-    const maxBytes = useLocalUploads2() ? MAX_BYTES_LOCAL : MAX_BYTES_VERCEL;
-    if (buffer.length > maxBytes) {
-      return c.json(
-        {
-          ok: false,
-          error: useLocalUploads2() ? "\u041C\u0430\u043A\u0441\u0438\u043C\u0430\u043B\u044C\u043D\u044B\u0439 \u0440\u0430\u0437\u043C\u0435\u0440 \u0432\u0438\u0434\u0435\u043E \u2014 50 MB" : "\u041D\u0430 Vercel \u043B\u0438\u043C\u0438\u0442 ~4 \u041C\u0411 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441. \u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0435 \u043A\u043E\u0440\u043E\u0442\u043A\u043E\u0435 \u043F\u0440\u0435\u0432\u044C\u044E \u0438\u043B\u0438 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435 \u0444\u0430\u0439\u043B \u0432 Supabase Storage (bucket portfolio)."
-        },
-        400
-      );
-    }
-    const ext = mime.includes("webm") ? "webm" : "mp4";
-    const fileId = randomUUID3();
-    const filename = `${fileId}.${ext}`;
-    if (useLocalUploads2()) {
-      await mkdir2(portfolioRoot, { recursive: true });
-      await writeFile3(join3(portfolioRoot, filename), buffer);
+portfolioAdminRoutes.post(
+  "/upload",
+  requirePermission("site.examples", "site.videos"),
+  async (c) => {
+    try {
+      const body = await c.req.parseBody({ all: true });
+      const raw2 = body.file;
+      const file = Array.isArray(raw2) ? raw2[0] : raw2;
+      if (!file || typeof file === "string") {
+        return c.json({ ok: false, error: "\u0424\u0430\u0439\u043B \u043D\u0435 \u043F\u0435\u0440\u0435\u0434\u0430\u043D" }, 400);
+      }
+      const mime = file.type || "application/octet-stream";
+      if (!mime.startsWith("video/")) {
+        return c.json({ ok: false, error: "\u041D\u0443\u0436\u0435\u043D \u0432\u0438\u0434\u0435\u043E\u0444\u0430\u0439\u043B" }, 400);
+      }
+      const buffer = Buffer.from(await file.arrayBuffer());
+      if (!buffer.length) {
+        return c.json({ ok: false, error: "\u041F\u0443\u0441\u0442\u043E\u0439 \u0444\u0430\u0439\u043B" }, 400);
+      }
+      const maxBytes = useLocalUploads() ? MAX_BYTES_LOCAL : MAX_BYTES_VERCEL;
+      if (buffer.length > maxBytes) {
+        return c.json(
+          {
+            ok: false,
+            error: useLocalUploads() ? "\u041C\u0430\u043A\u0441\u0438\u043C\u0430\u043B\u044C\u043D\u044B\u0439 \u0440\u0430\u0437\u043C\u0435\u0440 \u0432\u0438\u0434\u0435\u043E \u2014 50 MB" : "\u041D\u0430 Vercel \u043B\u0438\u043C\u0438\u0442 ~4 \u041C\u0411 \u043D\u0430 \u0437\u0430\u043F\u0440\u043E\u0441. \u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0435 \u043A\u043E\u0440\u043E\u0442\u043A\u043E\u0435 \u043F\u0440\u0435\u0432\u044C\u044E \u0438\u043B\u0438 \u043F\u043E\u043B\u043E\u0436\u0438\u0442\u0435 \u0444\u0430\u0439\u043B \u0432 Supabase Storage (bucket portfolio)."
+          },
+          400
+        );
+      }
+      const ext = mime.includes("webm") ? "webm" : "mp4";
+      const fileId = randomUUID3();
+      const filename = `${fileId}.${ext}`;
+      if (useLocalUploads()) {
+        await mkdir(portfolioRoot, { recursive: true });
+        await writeFile2(join3(portfolioRoot, filename), buffer);
+        return c.json({
+          ok: true,
+          file: {
+            name: file.name || filename,
+            src: `/videos/uploads/${filename}`,
+            mime,
+            size: buffer.length
+          }
+        });
+      }
+      const supabase = getSupabase();
+      const path = `portfolio/${filename}`;
+      const { error } = await supabase.storage.from("order-files").upload(path, buffer, {
+        contentType: mime,
+        upsert: false
+      });
+      if (error) throw new Error(error.message);
+      const { data, error: signError } = await supabase.storage.from("order-files").createSignedUrl(path, 60 * 60 * 24 * 365);
+      if (signError || !data?.signedUrl) {
+        throw new Error(signError?.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0432\u0438\u0434\u0435\u043E");
+      }
       return c.json({
         ok: true,
         file: {
           name: file.name || filename,
-          src: `/videos/uploads/${filename}`,
+          src: data.signedUrl,
           mime,
           size: buffer.length
         }
       });
+    } catch (error) {
+      return c.json(
+        {
+          ok: false,
+          error: error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0432\u0438\u0434\u0435\u043E"
+        },
+        500
+      );
     }
+  }
+);
+
+// server/src/routes/partners.ts
+init_supabase();
+var partnersPublicRoutes = new Hono2();
+partnersPublicRoutes.post("/", async (c) => {
+  try {
+    const ip = clientIp({ get: (n) => c.req.header(n) });
+    const limited = rateLimit({ key: `partner:${ip}`, limit: 5, windowMs: 60 * 60 * 1e3 });
+    if (!limited.ok) {
+      return c.json(
+        { ok: false, error: `\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u043D\u043E\u0433\u043E \u0437\u0430\u044F\u0432\u043E\u043A. \u041F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 ${limited.retryAfterSec} \u0441.` },
+        429
+      );
+    }
+    const body = await readJsonBody(c.req, {
+      name: "",
+      telegram: "",
+      audience: "",
+      comment: "",
+      website: ""
+    });
+    if (String(body.website || "").trim()) {
+      return c.json({ ok: true });
+    }
+    const name = String(body.name || "").trim();
+    const telegram = String(body.telegram || "").trim();
+    const audience = String(body.audience || "").trim();
+    const comment = String(body.comment || "").trim();
+    if (name.length < 2) return c.json({ ok: false, error: "\u0423\u043A\u0430\u0436\u0438\u0442\u0435 \u0438\u043C\u044F." }, 400);
+    if (!telegram) return c.json({ ok: false, error: "\u0423\u043A\u0430\u0436\u0438\u0442\u0435 Telegram." }, 400);
     const supabase = getSupabase();
-    const path = `portfolio/${filename}`;
-    const { error } = await supabase.storage.from("order-files").upload(path, buffer, {
-      contentType: mime,
-      upsert: false
-    });
-    if (error) throw new Error(error.message);
-    const { data, error: signError } = await supabase.storage.from("order-files").createSignedUrl(path, 60 * 60 * 24 * 365);
-    if (signError || !data?.signedUrl) {
-      throw new Error(signError?.message || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u043D\u0430 \u0432\u0438\u0434\u0435\u043E");
-    }
-    return c.json({
-      ok: true,
-      file: {
-        name: file.name || filename,
-        src: data.signedUrl,
-        mime,
-        size: buffer.length
+    const { data, error } = await supabase.from("partner_leads").insert({
+      name,
+      telegram: telegram.startsWith("@") ? telegram : `@${telegram.replace(/^@/, "")}`,
+      audience,
+      comment
+    }).select("id").single();
+    if (error) {
+      if (/relation .*partner_leads.* does not exist|schema cache/i.test(error.message)) {
+        return c.json(
+          {
+            ok: false,
+            error: "\u0422\u0430\u0431\u043B\u0438\u0446\u0430 partner_leads \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u043D\u0430. \u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 supabase/migrations/005_site_services_partners.sql"
+          },
+          503
+        );
       }
-    });
+      throw new Error(error.message);
+    }
+    const tgText = [
+      "\u{1F91D} <b>\u041F\u0430\u0440\u0442\u043D\u0451\u0440\u0441\u043A\u0430\u044F \u0437\u0430\u044F\u0432\u043A\u0430 iCL</b>",
+      `\u0418\u043C\u044F: ${name}`,
+      `Telegram: ${telegram}`,
+      audience ? `\u0410\u0443\u0434\u0438\u0442\u043E\u0440\u0438\u044F: ${audience}` : "",
+      comment ? `\u041A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439: ${comment}` : "",
+      data?.id ? `ID: <code>${data.id}</code>` : ""
+    ].filter(Boolean).join("\n");
+    void sendTelegramMessage(tgText).catch((err) => console.warn("[partners.telegram]", err));
+    return c.json({ ok: true });
   } catch (error) {
+    console.error("[partners]", error);
     return c.json(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : "\u041E\u0448\u0438\u0431\u043A\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0432\u0438\u0434\u0435\u043E"
-      },
+      { ok: false, error: error instanceof Error ? error.message : "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0437\u0430\u044F\u0432\u043A\u0443" },
       500
     );
   }
@@ -26001,7 +28502,11 @@ var RATE_WINDOW_MS = 8e3;
 var visitsPublicRoutes = new Hono2();
 visitsPublicRoutes.post("/", async (c) => {
   try {
-    const body = await c.req.json().catch(() => ({}));
+    const body = await readJsonBody(c.req, {
+      visitorId: "",
+      path: "/",
+      referrer: ""
+    });
     const visitorId = String(body.visitorId || "").trim();
     const path = String(body.path || "/").trim();
     if (!visitorId || visitorId.length < 8) {
@@ -26039,6 +28544,19 @@ try {
   setDefaultResultOrder2("ipv4first");
 } catch {
 }
+try {
+  assertServerConfig();
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (serverEnv.isProduction) {
+    console.error("[icl-api] FATAL config:", message);
+    throw error;
+  }
+  console.warn("[icl-api] config warning:", message);
+}
+void ensureOwnerAdmin().catch((error) => {
+  console.warn("[admins] seed failed:", error instanceof Error ? error.message : error);
+});
 var app = new Hono2();
 app.use(
   "*",
@@ -26048,52 +28566,29 @@ app.use(
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
   })
 );
-async function probeSupabase() {
-  const url = serverEnv.supabaseUrl?.replace(/\/$/, "");
-  const key = serverEnv.supabaseServiceRoleKey;
-  if (!url || !key) return { ok: false, error: "missing env" };
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8e3);
-    const res = await fetch(`${url}/auth/v1/health`, {
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
-      signal: controller.signal
-    });
-    clearTimeout(timer);
-    return { ok: res.ok, status: res.status };
-  } catch (error) {
-    const err = error;
-    return {
-      ok: false,
-      error: err.message || "fetch failed",
-      cause: err.cause ? String(err.cause) : void 0
-    };
-  }
-}
-app.get("/api/health", async (c) => {
-  const supabaseProbe = await probeSupabase();
-  return c.json({
+app.get(
+  "/api/health",
+  (c) => c.json({
     ok: true,
     service: "icl-api",
     runtime: process.env.VERCEL ? "vercel" : "node",
+    supabaseConfigured: Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey),
     telegramConfigured: Boolean(serverEnv.telegramBotToken && serverEnv.telegramAdminId),
-    telegramChatId: serverEnv.telegramAdminId || null,
     sheetsConfigured: Boolean(
       serverEnv.googleSheetsWebhookUrl && serverEnv.googleSheetsWebhookSecret
-    ),
-    supabaseConfigured: Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey),
-    supabaseReachable: supabaseProbe.ok,
-    supabaseProbe,
-    publicSiteUrl: serverEnv.publicSiteUrl || null,
-    allowedOrigins: serverEnv.allowedOrigins
-  });
-});
+    )
+  })
+);
 app.route("/api/auth", authRoutes);
 app.route("/api/orders", ordersPublicRoutes);
 app.route("/api/visits", visitsPublicRoutes);
+app.route("/api/partners", partnersPublicRoutes);
+app.route("/api/services", servicesPublicRoutes);
 app.route("/api/admin", adminRoutes);
+app.route("/api/admin/admins", adminsAdminRoutes);
 app.route("/api/admin/portfolio", portfolioAdminRoutes);
 app.route("/api/admin/users", adminUsersRoutes);
+app.route("/api/admin/services", servicesAdminRoutes);
 app.route("/api/files", filesPublicRoutes);
 app.notFound((c) => {
   if (c.req.path.startsWith("/api")) {

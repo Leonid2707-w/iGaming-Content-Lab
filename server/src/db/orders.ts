@@ -38,12 +38,57 @@ function generatePublicId() {
   return `ICL-${stamp}-${rand}`
 }
 
+function mapCreateError(msg: string) {
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|network/i.test(msg)) {
+    return new Error(
+      'Не удалось подключиться к Supabase. Проверьте SUPABASE_URL в .env (должен быть https://xxxx.supabase.co) и что проект запущен.',
+    )
+  }
+  if (/user_id|schema cache|profiles/i.test(msg)) {
+    return new Error(
+      'В Supabase не применена миграция auth (нет колонки orders.user_id / таблицы profiles). Откройте SQL Editor и выполните файл supabase/migrations/002_auth_profiles.sql',
+    )
+  }
+  return new Error(msg)
+}
+
 export async function createOrder(
   input: CreateOrderInput,
   files: OrderFile[] = [],
 ): Promise<OrderRecord> {
   const supabase = getSupabase()
   const publicId = generatePublicId()
+  const payload = {
+    p_public_id: publicId,
+    p_user_id: input.userId ?? null,
+    p_client_telegram: input.clientTelegram,
+    p_service_id: input.serviceId ?? null,
+    p_service_title: input.serviceTitle,
+    p_platform: input.platform ?? null,
+    p_quantity_label: input.quantityLabel ?? null,
+    p_price: input.price ?? null,
+    p_price_label: input.priceLabel ?? null,
+    p_description: input.description,
+    p_references_text: input.referencesText ?? '',
+    p_links: input.links ?? [],
+    p_files: files,
+    p_meta: input.meta ?? {},
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'create_order_with_history',
+    payload,
+  )
+
+  if (!rpcError && rpcData) {
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData
+    if (row) return mapOrder(row as Record<string, unknown>)
+  }
+
+  // Fallback when migration 006 is not applied yet
+  if (rpcError && !/could not find|PGRST202|function/i.test(rpcError.message)) {
+    throw mapCreateError(rpcError.message)
+  }
 
   const { data, error } = await supabase
     .from('orders')
@@ -68,18 +113,7 @@ export async function createOrder(
     .single()
 
   if (error || !data) {
-    const msg = error?.message || 'Не удалось сохранить заявку'
-    if (/fetch failed|ENOTFOUND|ECONNREFUSED|network/i.test(msg)) {
-      throw new Error(
-        'Не удалось подключиться к Supabase. Проверьте SUPABASE_URL в .env (должен быть https://xxxx.supabase.co) и что проект запущен.',
-      )
-    }
-    if (/user_id|schema cache|profiles/i.test(msg)) {
-      throw new Error(
-        'В Supabase не применена миграция auth (нет колонки orders.user_id / таблицы profiles). Откройте SQL Editor и выполните файл supabase/migrations/002_auth_profiles.sql',
-      )
-    }
-    throw new Error(msg)
+    throw mapCreateError(error?.message || 'Не удалось сохранить заявку')
   }
 
   await supabase.from('order_status_history').insert({
@@ -188,6 +222,24 @@ export async function getOrderHistory(orderId: string): Promise<OrderStatusHisto
 
 export async function updateOrderStatus(orderId: string, status: OrderStatus, note = '') {
   const supabase = getSupabase()
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'update_order_status_with_history',
+    {
+      p_order_id: orderId,
+      p_status: status,
+      p_note: note || '',
+    },
+  )
+
+  if (!rpcError && rpcData) {
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData
+    if (row) return mapOrder(row as Record<string, unknown>)
+  }
+
+  if (rpcError && !/could not find|PGRST202|function/i.test(rpcError.message)) {
+    throw new Error(rpcError.message || 'Не удалось обновить статус')
+  }
+
   const { data, error } = await supabase
     .from('orders')
     .update({ status, updated_at: new Date().toISOString() })

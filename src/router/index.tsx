@@ -1,16 +1,8 @@
+import { lazy, Suspense } from 'react'
 import { createBrowserRouter } from 'react-router-dom'
 import { HomePage } from '@/pages/HomePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { RootLayout } from '@/pages/RootLayout'
-import { AdminLayout } from '@/pages/admin/AdminLayout'
-import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage'
-import { AdminServicesPage } from '@/pages/admin/AdminServicesPage'
-import { AdminOrdersPage } from '@/pages/admin/AdminOrdersPage'
-import { AdminOrderDetailPage } from '@/pages/admin/AdminOrderDetailPage'
-import { AdminPlaceholderPage } from '@/pages/admin/AdminPlaceholderPage'
-import { AdminPortfolioPage } from '@/pages/admin/AdminPortfolioPage'
-import { AdminUsersPage } from '@/pages/admin/AdminUsersPage'
-import { AdminStatsPage } from '@/pages/admin/AdminStatsPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { RegisterPage } from '@/pages/auth/RegisterPage'
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
@@ -21,6 +13,40 @@ import { TermsPage, PrivacyPage, PersonalDataPage } from '@/pages/legal/LegalPag
 import { CabinetLayout } from '@/pages/cabinet/CabinetLayout'
 import { CabinetProfilePage } from '@/pages/cabinet/CabinetProfilePage'
 import { CabinetOrdersPage } from '@/pages/cabinet/CabinetOrdersPage'
+
+const AdminLayout = lazy(() =>
+  import('@/pages/admin/AdminLayout').then((m) => ({ default: m.AdminLayout })),
+)
+const AdminDashboardPage = lazy(() =>
+  import('@/pages/admin/AdminDashboardPage').then((m) => ({ default: m.AdminDashboardPage })),
+)
+const AdminServicesPage = lazy(() =>
+  import('@/pages/admin/AdminServicesPage').then((m) => ({ default: m.AdminServicesPage })),
+)
+const AdminOrdersPage = lazy(() =>
+  import('@/pages/admin/AdminOrdersPage').then((m) => ({ default: m.AdminOrdersPage })),
+)
+const AdminOrderDetailPage = lazy(() =>
+  import('@/pages/admin/AdminOrderDetailPage').then((m) => ({ default: m.AdminOrderDetailPage })),
+)
+const AdminPortfolioPage = lazy(() =>
+  import('@/pages/admin/AdminPortfolioPage').then((m) => ({ default: m.AdminPortfolioPage })),
+)
+const AdminUsersPage = lazy(() =>
+  import('@/pages/admin/AdminUsersPage').then((m) => ({ default: m.AdminUsersPage })),
+)
+const AdminStatsPage = lazy(() =>
+  import('@/pages/admin/AdminStatsPage').then((m) => ({ default: m.AdminStatsPage })),
+)
+const AdminAdminsPage = lazy(() =>
+  import('@/pages/admin/AdminAdminsPage').then((m) => ({ default: m.AdminAdminsPage })),
+)
+
+const adminFallback = (
+  <div className="flex min-h-screen items-center justify-center bg-icl-bg text-sm text-icl-muted">
+    Загрузка админки…
+  </div>
+)
 
 export const router = createBrowserRouter([
   {
@@ -47,33 +73,20 @@ export const router = createBrowserRouter([
       },
       {
         path: 'admin',
-        element: <AdminLayout />,
+        element: (
+          <Suspense fallback={adminFallback}>
+            <AdminLayout />
+          </Suspense>
+        ),
         children: [
           { index: true, element: <AdminDashboardPage /> },
           { path: 'stats', element: <AdminStatsPage /> },
           { path: 'services', element: <AdminServicesPage /> },
           { path: 'portfolio', element: <AdminPortfolioPage /> },
           { path: 'users', element: <AdminUsersPage /> },
-          {
-            path: 'content',
-            element: (
-              <AdminPlaceholderPage
-                title="Управление контентом"
-                description="Тексты сайта, блоки и преимущества. Раздел заложен под будущее ТЗ."
-              />
-            ),
-          },
           { path: 'orders', element: <AdminOrdersPage /> },
           { path: 'orders/:id', element: <AdminOrderDetailPage /> },
-          {
-            path: 'settings',
-            element: (
-              <AdminPlaceholderPage
-                title="Настройки сайта"
-                description="Тема, контакты и ссылки. Раздел заложен под будущее ТЗ."
-              />
-            ),
-          },
+          { path: 'admins', element: <AdminAdminsPage /> },
         ],
       },
       { path: '*', element: <NotFoundPage /> },

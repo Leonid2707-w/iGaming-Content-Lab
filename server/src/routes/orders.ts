@@ -5,8 +5,10 @@ import {
   updateOrderTelegramResult,
 } from '../db/orders.js'
 import { collectOrderLinks } from '../lib/links.js'
+import { clientIp, rateLimit } from '../lib/rateLimit.js'
 import { optionalUserAuth } from '../middleware/userAuth.js'
-import { uploadOrderFiles } from '../services/storage.js'
+import { getServiceById } from './services.js'
+import { MAX_ORDER_FILE_BYTES, uploadOrderFiles } from '../services/storage.js'
 import { syncOrderToSheets } from '../services/googleSheets.js'
 import { sendTelegramOrderNotification } from '../services/telegram.js'
 
@@ -20,10 +22,14 @@ function parseMeta(raw?: string) {
   }
 }
 
-function parsePrice(raw?: string) {
-  if (!raw || raw === '') return null
-  const value = Number(raw)
-  return Number.isFinite(value) ? value : null
+function formatPriceLabel(price: number | null, prefix?: string, unitLabel?: string) {
+  if (price == null) return 'Индивидуально'
+  const amount = `$${price.toLocaleString('en-US', {
+    minimumFractionDigits: Number.isInteger(price) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`
+  const withPrefix = prefix ? `${prefix} ${amount}` : amount
+  return unitLabel ? `${withPrefix} ${unitLabel}` : withPrefix
 }
 
 export const ordersPublicRoutes = new Hono()
@@ -32,8 +38,22 @@ ordersPublicRoutes.use('*', optionalUserAuth)
 
 ordersPublicRoutes.post('/', async (c) => {
   try {
+    const ip = clientIp({ get: (n) => c.req.header(n) })
+    const limited = rateLimit({ key: `order:${ip}`, limit: 12, windowMs: 60 * 60 * 1000 })
+    if (!limited.ok) {
+      return c.json(
+        { ok: false, error: `Слишком много заявок. Повторите через ${limited.retryAfterSec} с.` },
+        429,
+      )
+    }
+
     const form = await c.req.formData()
     const user = c.get('user')
+
+    // Honeypot — bots fill hidden fields
+    if (String(form.get('companyWebsite') || form.get('website') || '').trim()) {
+      return c.json({ ok: true, order: { id: 'ok', publicId: 'ok', telegramSent: false } })
+    }
 
     if (!user) {
       return c.json(
@@ -47,28 +67,70 @@ ordersPublicRoutes.post('/', async (c) => {
     }
 
     const clientTelegram = String(form.get('clientTelegram') || '').trim()
-    const serviceTitle = String(form.get('serviceTitle') || '').trim()
+    const serviceId = String(form.get('serviceId') || '').trim()
     const description = String(form.get('description') || '').trim()
     const referencesText = String(form.get('referencesText') || '')
+    const quantityRaw = Number(form.get('quantity') || form.get('qty') || 0)
 
     if (!clientTelegram) {
       return c.json({ ok: false, error: 'Укажите Telegram username' }, 400)
-    }
-    if (!serviceTitle) {
-      return c.json({ ok: false, error: 'Укажите услугу' }, 400)
     }
     if (!description) {
       return c.json({ ok: false, error: 'Опишите задачу' }, 400)
     }
 
-    const incomingFiles = form.getAll('files').filter((item): item is File => {
-      if (!item || typeof item !== 'object') return false
+    const catalogService = serviceId ? await getServiceById(serviceId) : null
+    const clientTitle = String(form.get('serviceTitle') || '').trim()
+    const serviceTitle =
+      (catalogService?.title as string | undefined) || clientTitle || 'Индивидуальная заявка'
+
+    let price: number | null = null
+    let priceLabel: string | undefined
+
+    if (catalogService && catalogService.priceMode === 'numeric' && typeof catalogService.price === 'number') {
+      const unitPrice = Number(catalogService.price)
+      const qty =
+        Number.isFinite(quantityRaw) && quantityRaw > 0
+          ? quantityRaw
+          : Number(catalogService.minimum) || 1
+      const prefix = typeof catalogService.pricePrefix === 'string' ? catalogService.pricePrefix : ''
+      if (catalogService.unit === 'piece' || catalogService.unitId === 'per_piece') {
+        price = Math.round(unitPrice * qty * 100) / 100
+        priceLabel = formatPriceLabel(price, prefix, `за ${qty} шт.`)
+      } else {
+        price = unitPrice
+        priceLabel = formatPriceLabel(
+          price,
+          prefix,
+          String(catalogService.unitLabel || ''),
+        )
+      }
+    } else if (catalogService?.priceMode === 'text') {
+      price = null
+      priceLabel = String(catalogService.priceText || 'Индивидуально')
+    } else {
+      // Fallback when catalog not in DB yet: accept client label, ignore client price number trust
+      const clientPrice = Number(form.get('price') || '')
+      price = Number.isFinite(clientPrice) ? clientPrice : null
+      priceLabel = String(form.get('priceLabel') || '') || undefined
+    }
+
+    const incomingFiles: File[] = []
+    for (const item of form.getAll('files')) {
+      if (typeof item === 'string') continue
       const candidate = item as File
-      return typeof candidate.arrayBuffer === 'function' && Number(candidate.size) > 0
-    })
+      if (typeof candidate.arrayBuffer === 'function' && Number(candidate.size) > 0) {
+        incomingFiles.push(candidate)
+      }
+    }
 
     if (incomingFiles.length > 12) {
       return c.json({ ok: false, error: 'Можно прикрепить не более 12 файлов' }, 400)
+    }
+    for (const file of incomingFiles) {
+      if (file.size > MAX_ORDER_FILE_BYTES) {
+        return c.json({ ok: false, error: `Файл «${file.name}» больше 50 МБ` }, 400)
+      }
     }
 
     const links = collectOrderLinks({
@@ -81,18 +143,19 @@ ordersPublicRoutes.post('/', async (c) => {
     let order = await createOrder({
       userId: user.id,
       clientTelegram,
-      serviceId: String(form.get('serviceId') || '') || undefined,
+      serviceId: serviceId || undefined,
       serviceTitle,
       platform: String(form.get('platform') || '') || undefined,
       quantityLabel: String(form.get('quantityLabel') || '') || undefined,
-      price: parsePrice(String(form.get('price') || '')),
-      priceLabel: String(form.get('priceLabel') || '') || undefined,
+      price,
+      priceLabel,
       description,
       referencesText,
       links,
       meta: parseMeta(String(form.get('meta') || '')),
     })
 
+    let fileWarning = ''
     if (incomingFiles.length) {
       try {
         const { files: uploaded, errors: fileErrors } = await uploadOrderFiles(
@@ -103,9 +166,11 @@ ordersPublicRoutes.post('/', async (c) => {
           order = await updateOrderFiles(order.id, uploaded)
         }
         if (fileErrors.length) {
+          fileWarning = fileErrors.join('; ')
           console.warn('[orders.files]', fileErrors)
         }
       } catch (fileError) {
+        fileWarning = fileError instanceof Error ? fileError.message : 'Ошибка загрузки файлов'
         console.warn('[orders.files]', fileError)
       }
     }
@@ -119,7 +184,6 @@ ordersPublicRoutes.post('/', async (c) => {
       console.warn('[orders.telegram]', telegram.error)
     }
 
-    // Не блокируем ответ клиенту, если таблица недоступна
     void syncOrderToSheets(order)
 
     return c.json({
@@ -131,6 +195,7 @@ ordersPublicRoutes.post('/', async (c) => {
         filesCount: order.files.length,
         linksCount: order.links.length,
       },
+      warning: fileWarning || undefined,
     })
   } catch (error) {
     console.error('[orders.create]', error)

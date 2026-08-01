@@ -1,12 +1,13 @@
 import { Hono } from 'hono'
-import { requireAdmin } from '../middleware/adminAuth.js'
+import { requireAdmin, requirePermission } from '../middleware/adminAuth.js'
 import { getSupabase } from '../db/supabase.js'
+import { readJsonBody } from '../lib/jsonBody.js'
 
 export const adminUsersRoutes = new Hono()
 
 adminUsersRoutes.use('/*', requireAdmin)
 
-adminUsersRoutes.get('/', async (c) => {
+adminUsersRoutes.get('/', requirePermission('users.view'), async (c) => {
   try {
     const search = (c.req.query('search') || '').trim().toLowerCase()
     const sort = c.req.query('sort') || 'newest'
@@ -75,7 +76,7 @@ adminUsersRoutes.get('/', async (c) => {
   }
 })
 
-adminUsersRoutes.get('/:userId', async (c) => {
+adminUsersRoutes.get('/:userId', requirePermission('users.view'), async (c) => {
   try {
     const userId = c.req.param('userId')
     const supabase = getSupabase()
@@ -113,10 +114,10 @@ adminUsersRoutes.get('/:userId', async (c) => {
   }
 })
 
-adminUsersRoutes.patch('/:userId/status', async (c) => {
+adminUsersRoutes.patch('/:userId/status', requirePermission('users.block'), async (c) => {
   try {
     const userId = c.req.param('userId')
-    const body = await c.req.json<{ status?: string }>().catch(() => ({}))
+    const body = await readJsonBody(c.req, { status: '' })
     const status = body.status
     if (status !== 'active' && status !== 'blocked') {
       return c.json({ ok: false, error: 'Некорректный статус' }, 400)

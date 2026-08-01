@@ -1,13 +1,17 @@
 import { setDefaultResultOrder } from 'node:dns'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { serverEnv } from './config/env.js'
+import { assertServerConfig, serverEnv } from './config/env.js'
+import { ensureOwnerAdmin } from './db/admins.js'
 import { adminRoutes } from './routes/admin.js'
+import { adminsAdminRoutes } from './routes/admins.js'
 import { adminUsersRoutes } from './routes/adminUsers.js'
 import { authRoutes } from './routes/auth.js'
 import { filesPublicRoutes } from './routes/files.js'
 import { ordersPublicRoutes } from './routes/orders.js'
 import { portfolioAdminRoutes } from './routes/portfolio.js'
+import { servicesAdminRoutes, servicesPublicRoutes } from './routes/services.js'
+import { partnersPublicRoutes } from './routes/partners.js'
 import { visitsPublicRoutes } from './routes/visits.js'
 
 try {
@@ -15,6 +19,21 @@ try {
 } catch {
   // ignore
 }
+
+try {
+  assertServerConfig()
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error)
+  if (serverEnv.isProduction) {
+    console.error('[icl-api] FATAL config:', message)
+    throw error
+  }
+  console.warn('[icl-api] config warning:', message)
+}
+
+void ensureOwnerAdmin().catch((error) => {
+  console.warn('[admins] seed failed:', error instanceof Error ? error.message : error)
+})
 
 export const app = new Hono()
 
@@ -27,54 +46,29 @@ app.use(
   }),
 )
 
-async function probeSupabase() {
-  const url = serverEnv.supabaseUrl?.replace(/\/$/, '')
-  const key = serverEnv.supabaseServiceRoleKey
-  if (!url || !key) return { ok: false as const, error: 'missing env' }
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 8_000)
-    const res = await fetch(`${url}/auth/v1/health`, {
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
-      signal: controller.signal,
-    })
-    clearTimeout(timer)
-    return { ok: res.ok, status: res.status }
-  } catch (error) {
-    const err = error as Error & { cause?: unknown }
-    return {
-      ok: false as const,
-      error: err.message || 'fetch failed',
-      cause: err.cause ? String(err.cause) : undefined,
-    }
-  }
-}
-
-app.get('/api/health', async (c) => {
-  const supabaseProbe = await probeSupabase()
-  return c.json({
+app.get('/api/health', (c) =>
+  c.json({
     ok: true,
     service: 'icl-api',
     runtime: process.env.VERCEL ? 'vercel' : 'node',
+    supabaseConfigured: Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey),
     telegramConfigured: Boolean(serverEnv.telegramBotToken && serverEnv.telegramAdminId),
-    telegramChatId: serverEnv.telegramAdminId || null,
     sheetsConfigured: Boolean(
       serverEnv.googleSheetsWebhookUrl && serverEnv.googleSheetsWebhookSecret,
     ),
-    supabaseConfigured: Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey),
-    supabaseReachable: supabaseProbe.ok,
-    supabaseProbe,
-    publicSiteUrl: serverEnv.publicSiteUrl || null,
-    allowedOrigins: serverEnv.allowedOrigins,
-  })
-})
+  }),
+)
 
 app.route('/api/auth', authRoutes)
 app.route('/api/orders', ordersPublicRoutes)
 app.route('/api/visits', visitsPublicRoutes)
+app.route('/api/partners', partnersPublicRoutes)
+app.route('/api/services', servicesPublicRoutes)
 app.route('/api/admin', adminRoutes)
+app.route('/api/admin/admins', adminsAdminRoutes)
 app.route('/api/admin/portfolio', portfolioAdminRoutes)
 app.route('/api/admin/users', adminUsersRoutes)
+app.route('/api/admin/services', servicesAdminRoutes)
 app.route('/api/files', filesPublicRoutes)
 
 app.notFound((c) => {

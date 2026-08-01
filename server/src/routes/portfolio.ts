@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getSupabase } from '../db/supabase.js'
-import { requireAdmin } from '../middleware/adminAuth.js'
+import { requireAdmin, requirePermission } from '../middleware/adminAuth.js'
 
 const MAX_BYTES_LOCAL = 50 * 1024 * 1024
 const MAX_BYTES_VERCEL = 4 * 1024 * 1024
@@ -22,10 +22,14 @@ export const portfolioAdminRoutes = new Hono()
 
 portfolioAdminRoutes.use('/*', requireAdmin)
 
-portfolioAdminRoutes.post('/upload', async (c) => {
+portfolioAdminRoutes.post(
+  '/upload',
+  requirePermission('site.examples', 'site.videos'),
+  async (c) => {
   try {
     const body = await c.req.parseBody({ all: true })
-    const file = body.file
+    const raw = body.file
+    const file = Array.isArray(raw) ? raw[0] : raw
     if (!file || typeof file === 'string') {
       return c.json({ ok: false, error: 'Файл не передан' }, 400)
     }
@@ -105,4 +109,5 @@ portfolioAdminRoutes.post('/upload', async (c) => {
       500,
     )
   }
-})
+  },
+)

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ExternalLink, Trash2 } from 'lucide-react'
 import {
+  AdminAuthError,
   ORDER_STATUS_LABELS,
   deleteAdminOrder,
   fetchAdminOrder,
+  resendAdminOrderTelegram,
   updateAdminOrderStatus,
   type OrderDto,
   type OrderHistoryDto,
@@ -29,13 +31,27 @@ function isVideo(mime: string) {
 export function AdminOrderDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
-  const { apiToken } = useAdminAuth()
+  const { apiToken, logout, openLoginModal, can } = useAdminAuth()
   const [order, setOrder] = useState<OrderDto | null>(null)
   const [history, setHistory] = useState<OrderHistoryDto[]>([])
   const [status, setStatus] = useState<OrderStatus>('new')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [resending, setResending] = useState(false)
   const [error, setError] = useState('')
+
+  const handleAuthError = useCallback(
+    (err: unknown, fallback: string) => {
+      if (err instanceof AdminAuthError) {
+        logout()
+        openLoginModal()
+        setError('Сессия истекла — войдите снова.')
+        return
+      }
+      setError(err instanceof Error ? err.message : fallback)
+    },
+    [logout, openLoginModal],
+  )
 
   const load = useCallback(async () => {
     if (!apiToken || !id) return
@@ -47,11 +63,11 @@ export function AdminOrderDetailPage() {
       setHistory(result.history || [])
       setStatus(result.order.status)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки заявки')
+      handleAuthError(err, 'Ошибка загрузки заявки')
     } finally {
       setLoading(false)
     }
-  }, [apiToken, id])
+  }, [apiToken, handleAuthError, id])
 
   useEffect(() => {
     void load()
@@ -66,7 +82,7 @@ export function AdminOrderDetailPage() {
       setOrder(result.order)
       setHistory(result.history || [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось обновить статус')
+      handleAuthError(err, 'Не удалось обновить статус')
     } finally {
       setSaving(false)
     }
@@ -79,7 +95,22 @@ export function AdminOrderDetailPage() {
       await deleteAdminOrder(apiToken, order.id)
       navigate('/admin/orders')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Не удалось удалить заявку')
+      handleAuthError(err, 'Не удалось удалить заявку')
+    }
+  }
+
+  async function handleResendTelegram() {
+    if (!apiToken || !order) return
+    setResending(true)
+    setError('')
+    try {
+      const result = await resendAdminOrderTelegram(apiToken, order.id)
+      if (result.order) setOrder(result.order)
+      if (!result.ok) setError(result.error || 'Не удалось отправить в Telegram')
+    } catch (err) {
+      handleAuthError(err, 'Не удалось отправить в Telegram')
+    } finally {
+      setResending(false)
     }
   }
 
@@ -114,10 +145,12 @@ export function AdminOrderDetailPage() {
             <p className="text-sm text-icl-muted">{formatDate(order.created_at)}</p>
           </div>
         </div>
-        <Button type="button" variant="outline-dark" onClick={() => void handleDelete()}>
-          <Trash2 size={14} />
-          Удалить
-        </Button>
+        {can('orders.delete') ? (
+          <Button type="button" variant="outline-dark" onClick={() => void handleDelete()}>
+            <Trash2 size={14} />
+            Удалить
+          </Button>
+        ) : null}
       </div>
 
       {error && (
@@ -154,8 +187,20 @@ export function AdminOrderDetailPage() {
             </div>
             <div>
               <dt className="text-xs uppercase tracking-[0.12em] text-icl-subtle">Telegram уведомление</dt>
-              <dd className="mt-1 text-icl-muted">
-                {order.telegram_sent ? 'Отправлено' : order.telegram_error || 'Не отправлено'}
+              <dd className="mt-1 flex flex-wrap items-center gap-3 text-icl-muted">
+                <span>
+                  {order.telegram_sent ? 'Отправлено' : order.telegram_error || 'Не отправлено'}
+                </span>
+                {can('orders.status') ? (
+                  <Button
+                    type="button"
+                    variant="outline-dark"
+                    disabled={resending}
+                    onClick={() => void handleResendTelegram()}
+                  >
+                    {resending ? 'Отправка…' : 'Повторить Telegram'}
+                  </Button>
+                ) : null}
               </dd>
             </div>
           </dl>
@@ -256,6 +301,7 @@ export function AdminOrderDetailPage() {
             <select
               className={`${inputClass} mt-4`}
               value={status}
+              disabled={!can('orders.status')}
               onChange={(event) => setStatus(event.target.value as OrderStatus)}
             >
               {(Object.keys(ORDER_STATUS_LABELS) as OrderStatus[]).map((key) => (
@@ -264,14 +310,18 @@ export function AdminOrderDetailPage() {
                 </option>
               ))}
             </select>
-            <Button
-              type="button"
-              className="mt-4 w-full"
-              disabled={saving || status === order.status}
-              onClick={() => void handleStatusSave()}
-            >
-              {saving ? 'Сохранение…' : 'Сохранить статус'}
-            </Button>
+            {can('orders.status') ? (
+              <Button
+                type="button"
+                className="mt-4 w-full"
+                disabled={saving || status === order.status}
+                onClick={() => void handleStatusSave()}
+              >
+                {saving ? 'Сохранение…' : 'Сохранить статус'}
+              </Button>
+            ) : (
+              <p className="mt-3 text-xs text-icl-subtle">Нет права на изменение статуса.</p>
+            )}
           </div>
 
           <div className="rounded-2xl border border-icl-border bg-icl-card p-5">

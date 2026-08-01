@@ -1,51 +1,34 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { getSupabase } from '../db/supabase.js'
 import type { OrderFile } from '../types/order.js'
 
-const uploadsRoot = join(fileURLToPath(new URL('../..', import.meta.url)), 'uploads')
 const BUCKET = 'order-files'
-/** Vercel request body limit ~4.5MB — keep headroom for multipart fields */
-const VERCEL_MAX_FILE_BYTES = 4 * 1024 * 1024
-
-function useLocalUploads() {
-  if (process.env.USE_LOCAL_UPLOADS === '1') return true
-  if (process.env.USE_LOCAL_UPLOADS === '0') return false
-  return process.env.VERCEL !== '1'
-}
-
-function maxFileBytes() {
-  return process.env.VERCEL === '1' ? VERCEL_MAX_FILE_BYTES : 100 * 1024 * 1024
-}
+const uploadsRoot = join(fileURLToPath(new URL('../..', import.meta.url)), 'uploads')
+/** Plan: support videos up to 50 MB (Vercel body limit may still cap ~4.5 MB on serverless). */
+export const MAX_ORDER_FILE_BYTES = 50 * 1024 * 1024
+const SIGNED_TTL_SEC = 60 * 60 // 1 hour
 
 function safeName(name: string) {
   return name.replace(/[^\w.\-()\sа-яА-ЯёЁ]/gi, '_').slice(0, 120) || 'file'
 }
 
-function publicFileUrl(fileId: string, filename: string) {
-  return `/api/files/${fileId}/${encodeURIComponent(filename)}`
-}
+const ALLOWED_MIME_PREFIXES = ['image/', 'video/', 'audio/', 'application/pdf']
+const ALLOWED_MIME_EXACT = new Set([
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+])
 
-async function saveLocally(
-  buffer: Buffer,
-  originalName: string,
-  mime: string,
-): Promise<OrderFile> {
-  const fileId = randomUUID()
-  const filename = safeName(originalName)
-  const diskPath = join(uploadsRoot, fileId, filename)
-  await mkdir(dirname(diskPath), { recursive: true })
-  await writeFile(diskPath, buffer)
-
-  return {
-    name: originalName,
-    path: `${fileId}/${filename}`,
-    url: publicFileUrl(fileId, filename),
-    mime,
-    size: buffer.length,
-  }
+function isAllowedMime(mime: string) {
+  if (!mime) return true
+  if (ALLOWED_MIME_EXACT.has(mime)) return true
+  return ALLOWED_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix))
 }
 
 async function saveToSupabase(
@@ -67,7 +50,7 @@ async function saveToSupabase(
 
   const { data, error: signError } = await supabase.storage
     .from(BUCKET)
-    .createSignedUrl(path, 60 * 60 * 24 * 7)
+    .createSignedUrl(path, SIGNED_TTL_SEC)
 
   if (signError || !data?.signedUrl) {
     throw new Error(signError?.message || 'Не удалось создать ссылку на файл')
@@ -90,31 +73,27 @@ export async function uploadOrderFiles(
 
   const uploaded: OrderFile[] = []
   const errors: string[] = []
-  const limit = maxFileBytes()
-  const local = useLocalUploads()
 
   for (const [index, file] of files.entries()) {
     const mime = file.type || 'application/octet-stream'
     const originalName = file.name || `file-${index + 1}`
 
     try {
+      if (!isAllowedMime(mime)) {
+        errors.push(`${originalName}: недопустимый тип файла`)
+        continue
+      }
       const buffer = Buffer.from(await file.arrayBuffer())
       if (!buffer.length) {
         errors.push(`${originalName}: пустой файл`)
         continue
       }
-      if (buffer.length > limit) {
-        errors.push(
-          `${originalName}: слишком большой файл (макс. ${Math.floor(limit / (1024 * 1024))} МБ на хостинге)`,
-        )
+      if (buffer.length > MAX_ORDER_FILE_BYTES) {
+        errors.push(`${originalName}: слишком большой файл (макс. 50 МБ)`)
         continue
       }
 
-      uploaded.push(
-        local
-          ? await saveLocally(buffer, originalName, mime)
-          : await saveToSupabase(orderPublicId, buffer, originalName, mime),
-      )
+      uploaded.push(await saveToSupabase(orderPublicId, buffer, originalName, mime))
     } catch (error) {
       errors.push(
         `${originalName}: ${error instanceof Error ? error.message : 'upload failed'}`,
@@ -125,6 +104,7 @@ export async function uploadOrderFiles(
   return { files: uploaded, errors }
 }
 
+/** Legacy local-disk helper for older orders still on disk. */
 export function resolveLocalUploadPath(fileId: string, filename: string) {
   const safeId = fileId.replace(/[^a-zA-Z0-9-]/g, '')
   const safeFile = safeName(filename)
@@ -144,7 +124,7 @@ export async function refreshSignedUrls(files: OrderFile[]): Promise<OrderFile[]
       const [fileId, ...rest] = file.path.split('/')
       result.push({
         ...file,
-        url: publicFileUrl(fileId, rest.join('/')),
+        url: `/api/files/${fileId}/${encodeURIComponent(rest.join('/'))}`,
       })
       continue
     }
@@ -152,16 +132,11 @@ export async function refreshSignedUrls(files: OrderFile[]): Promise<OrderFile[]
     if (file.path.includes('/')) {
       const { data, error } = await supabase.storage
         .from(BUCKET)
-        .createSignedUrl(file.path, 60 * 60 * 24 * 7)
+        .createSignedUrl(file.path, SIGNED_TTL_SEC)
       if (!error && data?.signedUrl) {
         result.push({ ...file, url: data.signedUrl })
         continue
       }
-    }
-
-    if (file.url.startsWith('/api/files/')) {
-      result.push(file)
-      continue
     }
 
     result.push(file)

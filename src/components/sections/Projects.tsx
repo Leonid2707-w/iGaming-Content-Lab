@@ -46,7 +46,7 @@ export function Projects() {
     <section
       id="projects"
       aria-labelledby="projects-title"
-      className="relative overflow-hidden border-b border-icl-border bg-icl-bg py-16 sm:py-20"
+      className="relative scroll-mt-20 overflow-hidden border-b border-icl-border bg-icl-bg py-16 sm:py-20"
     >
       <div className="pointer-events-none absolute inset-0 bg-grid-pattern opacity-25" aria-hidden="true" />
       <div className="pointer-events-none absolute -right-24 top-0 h-64 w-64 rounded-full bg-icl-accent/[0.07] blur-3xl" aria-hidden="true" />
@@ -152,6 +152,38 @@ export function Projects() {
                   <p className="mt-3 text-sm leading-relaxed text-icl-muted">
                     {project.description}
                   </p>
+
+                  <details className="group/details mt-4 rounded-xl border border-icl-border/80 bg-icl-surface-alt/40 open:bg-icl-surface-alt/70">
+                    <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-icl-text marker:content-none [&::-webkit-details-marker]:hidden">
+                      Подробности проекта
+                    </summary>
+                    <div className="space-y-3 border-t border-icl-border/70 px-4 py-3 text-sm text-icl-muted">
+                      <p>
+                        <span className="font-medium text-icl-text">Задача: </span>
+                        {project.task}
+                      </p>
+                      <div>
+                        <p className="font-medium text-icl-text">Работы</p>
+                        <ul className="mt-1 list-disc space-y-1 pl-5">
+                          {project.work.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="font-medium text-icl-text">Особенности</p>
+                        <ul className="mt-1 list-disc space-y-1 pl-5">
+                          {project.highlights.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <p>
+                        <span className="font-medium text-icl-text">Результат: </span>
+                        {project.result}
+                      </p>
+                    </div>
+                  </details>
 
                   <ul className="mt-5 flex flex-wrap gap-2" aria-label="Направления проекта">
                     {project.tags.map((tag) => (

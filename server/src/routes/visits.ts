@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { recordPageVisit } from '../db/visits.js'
+import { readJsonBody } from '../lib/jsonBody.js'
 
 const recentHits = new Map<string, number>()
 const RATE_WINDOW_MS = 8_000
@@ -8,13 +9,11 @@ export const visitsPublicRoutes = new Hono()
 
 visitsPublicRoutes.post('/', async (c) => {
   try {
-    const body = await c.req
-      .json<{
-        visitorId?: string
-        path?: string
-        referrer?: string
-      }>()
-      .catch(() => ({}))
+    const body = await readJsonBody(c.req, {
+      visitorId: '',
+      path: '/',
+      referrer: '',
+    })
 
     const visitorId = String(body.visitorId || '').trim()
     const path = String(body.path || '/').trim()

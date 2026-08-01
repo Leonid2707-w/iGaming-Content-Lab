@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { RefreshCw, Search } from 'lucide-react'
 import {
+  AdminAuthError,
   ORDER_STATUS_LABELS,
   deleteAdminOrder,
   fetchAdminOrders,
@@ -32,7 +33,7 @@ function statusClass(status: OrderStatus) {
 }
 
 export function AdminOrdersPage() {
-  const { apiToken, openLoginModal, logout } = useAdminAuth()
+  const { apiToken, openLoginModal, logout, can } = useAdminAuth()
   const [orders, setOrders] = useState<OrderDto[]>([])
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('newest')
@@ -52,11 +53,17 @@ export function AdminOrdersPage() {
       const result = await fetchAdminOrders(apiToken, { search, sort, status })
       setOrders(result.orders || [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ошибка загрузки заявок')
+      if (err instanceof AdminAuthError) {
+        logout()
+        openLoginModal()
+        setError('Сессия истекла — войдите снова.')
+      } else {
+        setError(err instanceof Error ? err.message : 'Ошибка загрузки заявок')
+      }
     } finally {
       setLoading(false)
     }
-  }, [apiToken, search, sort, status])
+  }, [apiToken, logout, openLoginModal, search, sort, status])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -198,13 +205,15 @@ export function AdminOrdersPage() {
                         >
                           Открыть
                         </Link>
-                        <button
-                          type="button"
-                          onClick={() => void handleDelete(order)}
-                          className="rounded-lg border border-red-500/20 px-3 py-1.5 text-xs font-medium text-red-500 transition hover:bg-red-500/10"
-                        >
-                          Удалить
-                        </button>
+                        {can('orders.delete') ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(order)}
+                            className="rounded-lg border border-red-500/20 px-3 py-1.5 text-xs font-medium text-red-500 transition hover:bg-red-500/10"
+                          >
+                            Удалить
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

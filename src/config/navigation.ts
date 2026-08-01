@@ -1,5 +1,5 @@
 export const navLinks = [
-  { label: 'Проекты', href: '/#projects' },
+  { label: 'iCL Projects', href: '/#projects' },
   { label: 'Услуги', href: '/#services' },
   { label: 'Заказ', href: '/#order' },
   { label: 'Партнёрам', href: '/#partner' },

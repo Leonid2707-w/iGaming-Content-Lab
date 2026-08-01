@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { navLinks } from '@/config/navigation'
 import { BrandLogo } from '@/components/ui/BrandLogo'
 import { Button } from '@/components/ui/Button'
@@ -11,6 +11,8 @@ import { useOrderModal } from '@/context/OrderModalContext'
 export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
+  const mobileNavRef = useRef<HTMLElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
   const { openOrder } = useOrderModal()
   const { isAuthenticated, loading } = useAuth()
 
@@ -26,8 +28,34 @@ export function Header() {
     if (!mobileOpen) return
     const previous = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    const nav = mobileNavRef.current
+    const focusable = nav?.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )
+    focusable?.[0]?.focus()
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setMobileOpen(false)
+        menuButtonRef.current?.focus()
+        return
+      }
+      if (event.key !== 'Tab' || !focusable?.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
     return () => {
       document.body.style.overflow = previous
+      document.removeEventListener('keydown', onKeyDown)
     }
   }, [mobileOpen])
 
@@ -93,11 +121,13 @@ export function Header() {
             </Button>
           )}
           <button
+            ref={menuButtonRef}
             type="button"
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-icl-border text-icl-text transition hover:bg-icl-surface-alt"
             onClick={() => setMobileOpen((open) => !open)}
             aria-label={mobileOpen ? 'Закрыть меню' : 'Открыть меню'}
             aria-expanded={mobileOpen}
+            aria-controls="mobile-navigation"
           >
             {mobileOpen ? <IconClose /> : <IconMenu />}
           </button>
@@ -106,6 +136,8 @@ export function Header() {
 
       {mobileOpen && (
         <nav
+          ref={mobileNavRef}
+          id="mobile-navigation"
           aria-label="Mobile navigation"
           className="safe-pb max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-t border-icl-border bg-icl-surface/98 px-4 py-4 backdrop-blur-xl lg:hidden"
         >

@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
 import { getSupabase } from '../db/supabase.js'
+import { readJsonBody } from '../lib/jsonBody.js'
+import { clientIp, rateLimit } from '../lib/rateLimit.js'
 import { requireUserAuth } from '../middleware/userAuth.js'
 import { serverEnv } from '../config/env.js'
 
@@ -49,7 +51,7 @@ async function ensureProfileFromUser(user: {
   const telegramUsername = normalizeTelegram(String(meta.telegram_username || ''))
   const email = (user.email || '').trim().toLowerCase()
 
-  let profile = await loadProfile(user.id)
+  const profile = await loadProfile(user.id)
   const needsName = !profile?.full_name && fullName
   const needsTelegram = !profile?.telegram_username && telegramUsername
   const needsCreate = !profile
@@ -116,6 +118,15 @@ function mapAuthError(message: string, cause?: unknown) {
 }
 
 authRoutes.post('/register', async (c) => {
+  const ip = clientIp({ get: (n) => c.req.header(n) })
+  const limited = rateLimit({ key: `auth-register:${ip}`, limit: 8, windowMs: 60 * 60 * 1000 })
+  if (!limited.ok) {
+    return c.json(
+      { ok: false, error: `Слишком много попыток. Повторите через ${limited.retryAfterSec} с.` },
+      429,
+    )
+  }
+
   const body = await c.req.json<{
     email?: string
     password?: string
@@ -230,6 +241,15 @@ authRoutes.post('/register', async (c) => {
 
 authRoutes.post('/login', async (c) => {
   try {
+    const ip = clientIp({ get: (n) => c.req.header(n) })
+    const limited = rateLimit({ key: `auth-login:${ip}`, limit: 30, windowMs: 15 * 60 * 1000 })
+    if (!limited.ok) {
+      return c.json(
+        { ok: false, error: `Слишком много попыток. Повторите через ${limited.retryAfterSec} с.` },
+        429,
+      )
+    }
+
     const body = await c.req.json<{ email?: string; password?: string }>()
     const email = (body.email || '').trim().toLowerCase()
     const password = body.password || ''
@@ -274,7 +294,7 @@ authRoutes.post('/login', async (c) => {
 })
 
 authRoutes.post('/forgot-password', async (c) => {
-  const body = await c.req.json<{ email?: string }>().catch(() => ({}))
+  const body = await readJsonBody(c.req, { email: '' })
   const email = String(body.email || '').trim().toLowerCase()
   if (!email) return c.json({ ok: false, error: 'Укажите email.' }, 400)
 

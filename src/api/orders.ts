@@ -55,22 +55,79 @@ async function parseJson<T>(response: Response): Promise<T> {
   return data
 }
 
-export async function submitOrderRequest(formData: FormData, accessToken?: string | null) {
-  const headers: HeadersInit = {}
-  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+type SubmitOrderResult = {
+  ok: boolean
+  order?: { id: string; publicId: string; telegramSent: boolean }
+  warning?: string
+  error?: string
+  code?: string
+}
 
-  const response = await fetch(`${API_BASE}/orders`, {
-    method: 'POST',
-    headers,
-    body: formData,
+function xhrSubmitOrder(
+  formData: FormData,
+  accessToken: string | null | undefined,
+  onProgress?: (percent: number) => void,
+): Promise<SubmitOrderResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE}/orders`)
+    if (accessToken) xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`)
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onProgress) return
+      onProgress(Math.round((event.loaded / event.total) * 100))
+    }
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText || '{}') as SubmitOrderResult
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(data)
+          return
+        }
+        reject(new Error(data.error || `HTTP ${xhr.status}`))
+      } catch {
+        reject(new Error(`HTTP ${xhr.status}`))
+      }
+    }
+    xhr.onerror = () => reject(new Error('Сеть недоступна'))
+    xhr.send(formData)
   })
-  return parseJson<{
-    ok: boolean
-    order?: { id: string; publicId: string; telegramSent: boolean }
-    warning?: string
-    error?: string
-    code?: string
-  }>(response)
+}
+
+export async function submitOrderRequest(
+  formData: FormData,
+  accessToken?: string | null,
+  options?: { onProgress?: (percent: number) => void; retries?: number },
+) {
+  const retries = options?.retries ?? 1
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      options?.onProgress?.(0)
+      const result = await xhrSubmitOrder(formData, accessToken, options?.onProgress)
+      options?.onProgress?.(100)
+      return result
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('Ошибка отправки')
+      const retryable = /сеть|network|failed|HTTP 5/i.test(lastError.message)
+      if (!retryable || attempt >= retries) break
+      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)))
+    }
+  }
+  throw lastError || new Error('Не удалось отправить заявку')
+}
+
+export class AdminAuthError extends Error {
+  constructor(message = 'Сессия администратора истекла') {
+    super(message)
+    this.name = 'AdminAuthError'
+  }
+}
+
+async function parseAdminJson<T>(response: Response): Promise<T> {
+  if (response.status === 401) {
+    throw new AdminAuthError()
+  }
+  return parseJson<T>(response)
 }
 
 export async function adminLoginRequest(login: string, password: string) {
@@ -79,7 +136,18 @@ export async function adminLoginRequest(login: string, password: string) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ login, password }),
   })
-  return parseJson<{ ok: boolean; token?: string; error?: string }>(response)
+  return parseJson<{
+    ok: boolean
+    token?: string
+    error?: string
+    admin?: {
+      id: string
+      login: string
+      displayName: string
+      isOwner: boolean
+      permissions: string[]
+    }
+  }>(response)
 }
 
 function authHeaders(token: string) {
@@ -98,14 +166,14 @@ export async function fetchAdminOrders(
   const response = await fetch(`${API_BASE}/admin/orders?${query.toString()}`, {
     headers: authHeaders(token),
   })
-  return parseJson<{ ok: boolean; orders: OrderDto[]; error?: string }>(response)
+  return parseAdminJson<{ ok: boolean; orders: OrderDto[]; error?: string }>(response)
 }
 
 export async function fetchAdminOrder(token: string, id: string) {
   const response = await fetch(`${API_BASE}/admin/orders/${id}`, {
     headers: authHeaders(token),
   })
-  return parseJson<{
+  return parseAdminJson<{
     ok: boolean
     order: OrderDto
     history: OrderHistoryDto[]
@@ -127,7 +195,7 @@ export async function updateAdminOrderStatus(
     },
     body: JSON.stringify({ status, note }),
   })
-  return parseJson<{
+  return parseAdminJson<{
     ok: boolean
     order: OrderDto
     history: OrderHistoryDto[]
@@ -140,5 +208,13 @@ export async function deleteAdminOrder(token: string, id: string) {
     method: 'DELETE',
     headers: authHeaders(token),
   })
-  return parseJson<{ ok: boolean; error?: string }>(response)
+  return parseAdminJson<{ ok: boolean; error?: string }>(response)
+}
+
+export async function resendAdminOrderTelegram(token: string, id: string) {
+  const response = await fetch(`${API_BASE}/admin/orders/${id}/resend-telegram`, {
+    method: 'POST',
+    headers: authHeaders(token),
+  })
+  return parseAdminJson<{ ok: boolean; order?: OrderDto; error?: string }>(response)
 }

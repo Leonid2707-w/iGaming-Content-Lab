@@ -13,7 +13,9 @@ export function Layout({ children, className = '' }: LayoutProps) {
     <div className={`flex min-h-screen flex-col bg-icl-bg ${className}`}>
       <AnimatedBackground />
       <Header />
-      <main className="relative flex-1">{children}</main>
+      <main id="main-content" className="relative flex-1 scroll-mt-20">
+        {children}
+      </main>
       <Footer />
     </div>
   )

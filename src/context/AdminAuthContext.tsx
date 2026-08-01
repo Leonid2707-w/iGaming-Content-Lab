@@ -10,16 +10,34 @@ import {
 } from 'react'
 import { adminLoginRequest } from '@/api/orders'
 import { adminConfig } from '@/config/admin'
+import {
+  hasAnyPermission,
+  type AdminPermission,
+} from '@/config/adminPermissions'
+
+interface AdminProfile {
+  id: string
+  login: string
+  displayName: string
+  isOwner: boolean
+  permissions: AdminPermission[]
+}
 
 interface AdminSession {
   login: string
   expiresAt: number
   apiToken?: string
+  profile?: AdminProfile
 }
 
 interface AdminAuthContextValue {
   isAuthenticated: boolean
   apiToken: string | null
+  admin: AdminProfile | null
+  isOwner: boolean
+  permissions: AdminPermission[]
+  can: (key: AdminPermission) => boolean
+  canAny: (...keys: AdminPermission[]) => boolean
   loginModalOpen: boolean
   openLoginModal: () => void
   closeLoginModal: () => void
@@ -29,13 +47,34 @@ interface AdminAuthContextValue {
 
 const AdminAuthContext = createContext<AdminAuthContextValue | null>(null)
 const API_TOKEN_KEY = 'icl-admin-api-token'
+const PROFILE_KEY = 'icl-admin-profile'
 
 function clearSessionStorage() {
   sessionStorage.removeItem(adminConfig.sessionKey)
   sessionStorage.removeItem(API_TOKEN_KEY)
+  sessionStorage.removeItem(PROFILE_KEY)
 }
 
-function readSession(): AdminSession | null {
+function readProfile(): AdminProfile | null {
+  try {
+    const raw = sessionStorage.getItem(PROFILE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as AdminProfile
+  } catch {
+    return null
+  }
+}
+
+function writeProfile(profile: AdminProfile) {
+  sessionStorage.setItem(PROFILE_KEY, JSON.stringify(profile))
+}
+
+function readSession(): {
+  login: string
+  expiresAt: number
+  apiToken: string
+  profile: AdminProfile | null
+} | null {
   try {
     const raw = sessionStorage.getItem(adminConfig.sessionKey)
     if (!raw) return null
@@ -45,32 +84,39 @@ function readSession(): AdminSession | null {
       return null
     }
     const apiToken = sessionStorage.getItem(API_TOKEN_KEY) || parsed.apiToken || ''
-    // Старые сессии без API-токена не считаются валидными
     if (!apiToken) {
       clearSessionStorage()
       return null
     }
-    return { ...parsed, apiToken }
+    return {
+      login: parsed.login,
+      expiresAt: parsed.expiresAt,
+      apiToken,
+      profile: readProfile() ?? parsed.profile ?? null,
+    }
   } catch {
     clearSessionStorage()
     return null
   }
 }
 
-function writeSession(login: string, apiToken: string) {
+function writeSession(login: string, apiToken: string, profile: AdminProfile) {
   const session: AdminSession = {
     login,
     expiresAt: Date.now() + adminConfig.sessionTtlMs,
     apiToken,
+    profile,
   }
   sessionStorage.setItem(adminConfig.sessionKey, JSON.stringify(session))
   sessionStorage.setItem(API_TOKEN_KEY, apiToken)
+  writeProfile(profile)
 }
 
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const initial = readSession()
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!initial?.apiToken)
   const [apiToken, setApiToken] = useState<string | null>(() => initial?.apiToken || null)
+  const [admin, setAdmin] = useState<AdminProfile | null>(() => initial?.profile || null)
   const [loginModalOpen, setLoginModalOpen] = useState(false)
 
   useEffect(() => {
@@ -78,10 +124,12 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     if (!session?.apiToken) {
       setIsAuthenticated(false)
       setApiToken(null)
+      setAdmin(null)
       return
     }
     setIsAuthenticated(true)
     setApiToken(session.apiToken)
+    setAdmin(session.profile)
   }, [])
 
   const openLoginModal = useCallback(() => setLoginModalOpen(true), [])
@@ -98,8 +146,16 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       if (!api.ok || !api.token) {
         return { ok: false, error: api.error || 'Неверный логин или пароль.' }
       }
-      writeSession(trimmed, api.token)
+      const profile: AdminProfile = {
+        id: api.admin?.id || 'unknown',
+        login: api.admin?.login || trimmed,
+        displayName: api.admin?.displayName || '',
+        isOwner: Boolean(api.admin?.isOwner),
+        permissions: (api.admin?.permissions || []) as AdminPermission[],
+      }
+      writeSession(profile.login, api.token, profile)
       setApiToken(api.token)
+      setAdmin(profile)
       setIsAuthenticated(true)
       setLoginModalOpen(false)
       return { ok: true }
@@ -122,13 +178,32 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     clearSessionStorage()
     setApiToken(null)
+    setAdmin(null)
     setIsAuthenticated(false)
   }, [])
+
+  const can = useCallback(
+    (key: AdminPermission) => {
+      if (admin?.isOwner) return true
+      return Boolean(admin?.permissions?.includes(key))
+    },
+    [admin],
+  )
+
+  const canAny = useCallback(
+    (...keys: AdminPermission[]) => hasAnyPermission(admin?.permissions, keys, admin?.isOwner),
+    [admin],
+  )
 
   const value = useMemo(
     () => ({
       isAuthenticated,
       apiToken,
+      admin,
+      isOwner: Boolean(admin?.isOwner),
+      permissions: admin?.permissions || [],
+      can,
+      canAny,
       loginModalOpen,
       openLoginModal,
       closeLoginModal,
@@ -136,7 +211,10 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       logout,
     }),
     [
+      admin,
       apiToken,
+      can,
+      canAny,
       closeLoginModal,
       isAuthenticated,
       login,

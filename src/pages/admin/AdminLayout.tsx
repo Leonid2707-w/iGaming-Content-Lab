@@ -2,34 +2,106 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
   Clapperboard,
-  FileText,
   LayoutDashboard,
   LogOut,
   Package,
-  Settings,
+  Shield,
   ShoppingBag,
   Users,
 } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { BrandLogo } from '@/components/ui/BrandLogo'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { useAdminAuth } from '@/context/AdminAuthContext'
+import type { AdminPermission } from '@/config/adminPermissions'
 import { clsx } from 'clsx'
 
-const nav = [
-  { to: '/admin', label: 'Обзор', icon: LayoutDashboard, end: true },
-  { to: '/admin/stats', label: 'Статистика', icon: BarChart3 },
-  { to: '/admin/services', label: 'Услуги', icon: Package },
-  { to: '/admin/portfolio', label: 'Примеры работ', icon: Clapperboard },
-  { to: '/admin/users', label: 'Пользователи', icon: Users },
-  { to: '/admin/orders', label: 'Заявки', icon: ShoppingBag },
-  { to: '/admin/content', label: 'Контент', icon: FileText, soon: true },
-  { to: '/admin/settings', label: 'Настройки', icon: Settings, soon: true },
+const nav: {
+  to: string
+  label: string
+  icon: typeof LayoutDashboard
+  end?: boolean
+  anyOf: AdminPermission[]
+  ownerOnly?: boolean
+}[] = [
+  {
+    to: '/admin',
+    label: 'Обзор',
+    icon: LayoutDashboard,
+    end: true,
+    anyOf: [
+      'orders.view',
+      'services.list',
+      'services.prices',
+      'analytics.visits',
+      'analytics.orders',
+    ],
+  },
+  {
+    to: '/admin/stats',
+    label: 'Статистика',
+    icon: BarChart3,
+    anyOf: [
+      'analytics.visits',
+      'analytics.orders',
+      'analytics.registrations',
+      'analytics.finance',
+    ],
+  },
+  {
+    to: '/admin/services',
+    label: 'Услуги',
+    icon: Package,
+    anyOf: ['services.prices', 'services.units', 'services.list'],
+  },
+  {
+    to: '/admin/portfolio',
+    label: 'Примеры работ',
+    icon: Clapperboard,
+    anyOf: ['site.examples', 'site.videos', 'site.images'],
+  },
+  {
+    to: '/admin/users',
+    label: 'Пользователи',
+    icon: Users,
+    anyOf: ['users.view', 'users.block', 'users.delete'],
+  },
+  {
+    to: '/admin/orders',
+    label: 'Заявки',
+    icon: ShoppingBag,
+    anyOf: ['orders.view', 'orders.status', 'orders.delete'],
+  },
+  {
+    to: '/admin/admins',
+    label: 'Администраторы',
+    icon: Shield,
+    anyOf: ['admins.create', 'admins.delete', 'admins.permissions'],
+  },
 ]
 
 export function AdminLayout() {
-  const { isAuthenticated, openLoginModal, logout } = useAdminAuth()
+  const { isAuthenticated, openLoginModal, logout, canAny, isOwner, admin } = useAdminAuth()
   const navigate = useNavigate()
+
+  const visibleNav = useMemo(
+    () =>
+      nav.filter((item) => {
+        if (isOwner) return true
+        return canAny(...item.anyOf)
+      }),
+    [canAny, isOwner],
+  )
+
+  useEffect(() => {
+    const meta = document.createElement('meta')
+    meta.name = 'robots'
+    meta.content = 'noindex,nofollow'
+    document.head.appendChild(meta)
+    return () => {
+      meta.remove()
+    }
+  }, [])
 
   useEffect(() => {
     if (!isAuthenticated) openLoginModal()
@@ -70,11 +142,17 @@ export function AdminLayout() {
     <div className="min-h-screen bg-icl-bg text-icl-text">
       <header className="sticky top-0 z-40 border-b border-icl-border bg-icl-surface/90 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
-          <div className="flex items-center gap-4">
+          <div className="flex min-w-0 items-center gap-4">
             <BrandLogo className="h-8" />
             <span className="hidden rounded-full border border-icl-border px-3 py-1 text-xs font-medium text-icl-muted sm:inline">
               Админ-панель
             </span>
+            {admin ? (
+              <span className="truncate text-xs text-icl-subtle">
+                {admin.displayName || admin.login}
+                {isOwner ? ' · Владелец' : ''}
+              </span>
+            ) : null}
           </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
@@ -100,7 +178,7 @@ export function AdminLayout() {
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[220px_1fr]">
         <aside className="h-fit rounded-2xl border border-icl-border bg-icl-card p-3">
           <nav className="space-y-1">
-            {nav.map((item) => {
+            {visibleNav.map((item) => {
               const Icon = item.icon
               return (
                 <NavLink
@@ -118,11 +196,6 @@ export function AdminLayout() {
                 >
                   <Icon size={16} />
                   <span className="flex-1">{item.label}</span>
-                  {'soon' in item && item.soon ? (
-                    <span className="rounded-full bg-icl-surface-alt px-2 py-0.5 text-[10px] uppercase tracking-wide text-icl-subtle">
-                      Скоро
-                    </span>
-                  ) : null}
                 </NavLink>
               )
             })}

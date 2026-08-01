@@ -28,7 +28,7 @@ import {
   type FormEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { EditableQuantity } from '@/components/ui/EditableQuantity'
 import { FormField, inputClass } from '@/components/ui/FormField'
@@ -47,6 +47,8 @@ import {
   VIDEO_EXAMPLE_GROUPS,
   type VideoExampleGroupId,
 } from '@/config/content/videoExamples'
+import { formatBytes, validateOrderFiles } from '@/lib/orderFiles'
+import { formatMoney } from '@/lib/orderPricing'
 import { VideoExamplesBlock } from '@/components/video/VideoExamplesBlock'
 import { useAuth } from '@/context/AuthContext'
 import { useOrderModal } from '@/context/OrderModalContext'
@@ -183,10 +185,6 @@ function normalizeClientLink(value: string) {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
 }
 
-function formatMoney(value: number) {
-  return value % 1 === 0 ? value.toLocaleString('en-US') : value.toFixed(1)
-}
-
 export function OrderModal() {
   const {
     isOpen,
@@ -230,6 +228,8 @@ export function OrderModal() {
   const [linkDraft, setLinkDraft] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [consentPrivacy, setConsentPrivacy] = useState(false)
   const [submittedPublicId, setSubmittedPublicId] = useState('')
 
   const isSocial = selectedId === SOCIAL_ORDER_ID
@@ -323,6 +323,8 @@ export function OrderModal() {
     setLinkDraft('')
     setError('')
     setSubmitting(false)
+    setUploadProgress(null)
+    setConsentPrivacy(false)
     setSubmittedPublicId('')
 
     previousFocus.current = document.activeElement as HTMLElement
@@ -439,9 +441,12 @@ export function OrderModal() {
   function handleFiles(event: ChangeEvent<HTMLInputElement>) {
     const next = Array.from(event.target.files ?? [])
     if (!next.length) return
+    const { ok, errors } = validateOrderFiles(next)
+    if (errors.length) setError(errors.join(' '))
+    else setError('')
     setFiles((current) => {
       const merged = [...current]
-      for (const file of next) {
+      for (const file of ok) {
         if (!merged.some((item) => item.name === file.name && item.size === file.size)) {
           merged.push(file)
         }
@@ -483,6 +488,10 @@ export function OrderModal() {
     }
     if (!selectedId) {
       setError('Выберите услугу.')
+      return
+    }
+    if (!consentPrivacy) {
+      setError('Подтвердите согласие на обработку персональных данных.')
       return
     }
 
@@ -548,8 +557,10 @@ export function OrderModal() {
     formData.set('clientTelegram', telegram.trim())
     formData.set('serviceId', isVideoOrder && videoType ? videoType : selectedId)
     formData.set('serviceTitle', serviceTitle)
+    formData.set('companyWebsite', '') // honeypot
     if (platformLabel) formData.set('platform', platformLabel)
     if (quantityLabel) formData.set('quantityLabel', quantityLabel)
+    if (isVideoOrder || showQuantity) formData.set('quantity', String(quantity))
     if (orderTotal !== undefined) formData.set('price', String(orderTotal))
     if (priceLabel) formData.set('priceLabel', priceLabel)
     formData.set('description', description.trim())
@@ -588,9 +599,13 @@ export function OrderModal() {
     for (const file of files) formData.append('files', file)
 
     setSubmitting(true)
+    setUploadProgress(files.length ? 0 : null)
     setError('')
     try {
-      const result = await submitOrderRequest(formData, accessToken)
+      const result = await submitOrderRequest(formData, accessToken, {
+        onProgress: files.length ? setUploadProgress : undefined,
+        retries: 1,
+      })
       if (!result.ok) {
         setError(result.error || 'Не удалось отправить заявку')
         return
@@ -601,6 +616,7 @@ export function OrderModal() {
       setError(err instanceof Error ? err.message : 'Не удалось отправить заявку')
     } finally {
       setSubmitting(false)
+      setUploadProgress(null)
     }
   }
 
@@ -664,7 +680,7 @@ export function OrderModal() {
                 Добавить файлы
               </p>
               <p className="mt-1 text-xs text-icl-muted">
-                Фото, видео и аудио — до 12 файлов.
+                Фото, видео и аудио — до 12 файлов, каждый до 50 МБ.
               </p>
             </div>
             <Button
@@ -694,9 +710,7 @@ export function OrderModal() {
                 >
                   <span className="truncate text-icl-muted">
                     {file.name}
-                    <span className="ml-2 text-xs text-icl-subtle">
-                      {(file.size / 1024 / 1024).toFixed(1)} MB
-                    </span>
+                    <span className="ml-2 text-xs text-icl-subtle">{formatBytes(file.size)}</span>
                   </span>
                   <button
                     type="button"
@@ -1237,6 +1251,19 @@ export function OrderModal() {
                               </div>
 
                               {igCreativeType && (
+                                <VideoExamplesBlock
+                                  groupId={igCreativeType === 'ai' ? 'ai-video' : 'video-creative'}
+                                  compact
+                                  title={
+                                    igCreativeType === 'ai'
+                                      ? 'Примеры · AI-видеокреативы'
+                                      : 'Примеры · Видеокреативы'
+                                  }
+                                  subtitle="Те же примеры, что в заказе видеокреативов — общий каталог из админки."
+                                />
+                              )}
+
+                              {igCreativeType && (
                                 <motion.div
                                   initial={motionOff ? false : { opacity: 0, y: 8 }}
                                   animate={{ opacity: 1, y: 0 }}
@@ -1399,6 +1426,27 @@ export function OrderModal() {
                       </FormField>
 
                       {renderAttachmentBlocks()}
+
+                      <label className="flex items-start gap-3 rounded-xl border border-icl-border bg-icl-surface/60 px-3 py-3 text-sm text-icl-muted">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={consentPrivacy}
+                          onChange={(event) => setConsentPrivacy(event.target.checked)}
+                          required
+                        />
+                        <span>
+                          Согласен на обработку персональных данных согласно{' '}
+                          <Link
+                            to="/legal/privacy"
+                            className="text-icl-accent underline-offset-2 hover:underline"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            политике конфиденциальности
+                          </Link>
+                          .
+                        </span>
+                      </label>
                     </div>
 
                     <aside className="h-fit rounded-2xl border border-icl-border bg-icl-card p-5">
@@ -1509,9 +1557,27 @@ export function OrderModal() {
               )}
 
               {error && isAuthenticated && (
-                <p className="mt-5 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-500">
+                <p
+                  className="mt-5 rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-500"
+                  role="alert"
+                  aria-live="assertive"
+                >
                   {error}
                 </p>
+              )}
+              {uploadProgress != null && submitting && (
+                <div className="mt-4" aria-live="polite">
+                  <div className="mb-1 flex justify-between text-xs text-icl-subtle">
+                    <span>Загрузка файлов</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-icl-surface-alt">
+                    <div
+                      className="h-full rounded-full bg-icl-accent transition-all"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
               )}
             </div>
 
@@ -1535,12 +1601,16 @@ export function OrderModal() {
                   <Button
                     type="button"
                     className="min-h-11 flex-1 sm:flex-none"
-                    disabled={submitting}
+                    disabled={submitting || !consentPrivacy}
                     onClick={() =>
                       dialogRef.current?.querySelector<HTMLFormElement>('form')?.requestSubmit()
                     }
                   >
-                    {submitting ? 'Отправка…' : 'Отправить заявку'}
+                    {submitting
+                      ? uploadProgress != null
+                        ? `Отправка… ${uploadProgress}%`
+                        : 'Отправка…'
+                      : 'Отправить заявку'}
                     {!submitting && <ArrowRight size={16} />}
                   </Button>
                 )}

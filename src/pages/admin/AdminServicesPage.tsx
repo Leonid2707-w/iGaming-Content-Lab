@@ -11,8 +11,15 @@ import { PRICE_UNITS } from '@/config/priceUnits'
 import { useServices } from '@/context/ServicesContext'
 
 export function AdminServicesPage() {
-  const { services, updateService, setServiceUnit, toggleService, resetServices } =
-    useServices()
+  const {
+    services,
+    updateService,
+    setServiceUnit,
+    toggleService,
+    resetServices,
+    syncing,
+    syncError,
+  } = useServices()
   const [selectedId, setSelectedId] = useState(services[0]?.id ?? '')
   const [savedFlash, setSavedFlash] = useState(false)
 
@@ -45,9 +52,11 @@ export function AdminServicesPage() {
             Название, цена, единица расчёта и видимость на сайте. Цены «Ведение Telegram» и
             «Telegram-посты» автоматически участвуют в расчёте заказа ведения Telegram.
           </p>
-          <p className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-            Пока сохраняется только в этом браузере (localStorage). На других устройствах у
-            посетителей останутся дефолтные данные, пока не сделаем серверное сохранение.
+          <p className="mt-3 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-700 dark:text-sky-300">
+            Каталог синхронизируется с Supabase (`site_services`). Нужна миграция
+            `005_site_services_partners.sql`. Локальный кэш — fallback.
+            {syncing ? ' Сохранение в облако…' : ''}
+            {syncError ? ` Ошибка облака: ${syncError}` : ''}
           </p>
         </div>
         <div className="flex items-center gap-3">

@@ -1,7 +1,18 @@
+import { useEffect } from 'react'
 import { Layout } from '@/components/layout/Layout'
 import { Button } from '@/components/ui/Button'
 
 export function NotFoundPage() {
+  useEffect(() => {
+    const meta = document.createElement('meta')
+    meta.name = 'robots'
+    meta.content = 'noindex,nofollow'
+    document.head.appendChild(meta)
+    return () => {
+      meta.remove()
+    }
+  }, [])
+
   return (
     <Layout>
       <section className="container-icl flex min-h-[60vh] flex-col items-center justify-center py-24 text-center">
