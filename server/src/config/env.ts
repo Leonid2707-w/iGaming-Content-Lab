@@ -47,10 +47,19 @@ export const serverEnv = {
   adminApiSecret: adminApiSecret || 'icl-change-me-admin-secret',
 }
 
-export function assertServerConfig() {
+/** Required for Auth / orders / DB access. */
+export function assertSupabaseConfig() {
   const missing: string[] = []
   if (!serverEnv.supabaseUrl) missing.push('SUPABASE_URL')
   if (!serverEnv.supabaseServiceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY')
+  if (missing.length) {
+    throw new Error(`Missing env: ${missing.join(', ')}`)
+  }
+}
+
+/** Required for admin panel API only. */
+export function assertAdminConfig() {
+  const missing: string[] = []
   if (!serverEnv.adminPassword) missing.push('ADMIN_PASSWORD')
   if (!adminApiSecret || weakSecrets.has(adminApiSecret)) {
     missing.push('ADMIN_API_SECRET (задайте длинный случайный секрет, не дефолт)')
@@ -58,4 +67,10 @@ export function assertServerConfig() {
   if (missing.length) {
     throw new Error(`Missing/weak env: ${missing.join(', ')}`)
   }
+}
+
+/** Full server boot check (local CLI / admin tooling). */
+export function assertServerConfig() {
+  assertSupabaseConfig()
+  assertAdminConfig()
 }

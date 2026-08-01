@@ -1,11 +1,11 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { assertServerConfig, serverEnv } from '../config/env.js'
+import { assertSupabaseConfig, serverEnv } from '../config/env.js'
 
 let client: SupabaseClient | null = null
 
 export function getSupabase(): SupabaseClient {
   if (client) return client
-  assertServerConfig()
+  assertSupabaseConfig()
 
   const url = serverEnv.supabaseUrl!
   const serviceKey = serverEnv.supabaseServiceRoleKey!

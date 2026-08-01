@@ -376,29 +376,19 @@ function parseOrigins(raw2, publicSiteUrl2) {
   const withSite = publicSiteUrl2 ? [publicSiteUrl2.replace(/\/$/, "")] : [];
   return [.../* @__PURE__ */ new Set([...defaults, ...withSite, ...fromEnv])];
 }
-function assertServerConfig() {
+function assertSupabaseConfig() {
   const missing = [];
   if (!serverEnv.supabaseUrl) missing.push("SUPABASE_URL");
   if (!serverEnv.supabaseServiceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
-  if (!serverEnv.adminPassword) missing.push("ADMIN_PASSWORD");
-  if (!adminApiSecret || weakSecrets.has(adminApiSecret)) {
-    missing.push("ADMIN_API_SECRET (\u0437\u0430\u0434\u0430\u0439\u0442\u0435 \u0434\u043B\u0438\u043D\u043D\u044B\u0439 \u0441\u043B\u0443\u0447\u0430\u0439\u043D\u044B\u0439 \u0441\u0435\u043A\u0440\u0435\u0442, \u043D\u0435 \u0434\u0435\u0444\u043E\u043B\u0442)");
-  }
   if (missing.length) {
-    throw new Error(`Missing/weak env: ${missing.join(", ")}`);
+    throw new Error(`Missing env: ${missing.join(", ")}`);
   }
 }
-var import_dotenv, weakSecrets, publicSiteUrl, adminApiSecret, serverEnv;
+var import_dotenv, publicSiteUrl, adminApiSecret, serverEnv;
 var init_env = __esm({
   "server/src/config/env.ts"() {
     import_dotenv = __toESM(require_main(), 1);
     (0, import_dotenv.config)({ path: resolve(process.cwd(), ".env"), quiet: true });
-    weakSecrets = /* @__PURE__ */ new Set([
-      "icl-change-me-admin-secret",
-      "replace-with-long-random-secret",
-      "secret",
-      "change-me"
-    ]);
     publicSiteUrl = required("PUBLIC_SITE_URL") || required("SITE_URL");
     adminApiSecret = required("ADMIN_API_SECRET");
     serverEnv = {
@@ -21770,7 +21760,7 @@ var init_dist4 = __esm({
 // server/src/db/supabase.ts
 function getSupabase() {
   if (client) return client;
-  assertServerConfig();
+  assertSupabaseConfig();
   const url = serverEnv.supabaseUrl;
   const serviceKey = serverEnv.supabaseServiceRoleKey;
   client = createClient(url, serviceKey, {
@@ -25291,8 +25281,10 @@ authRoutes.get("/status", (c) => {
   try {
     getSupabase();
     return c.json({ ok: true, configured: true });
-  } catch {
-    return c.json({ ok: true, configured: false });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Supabase \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D";
+    console.warn("[auth.status]", reason);
+    return c.json({ ok: true, configured: false, reason });
   }
 });
 function mapAuthError(message) {

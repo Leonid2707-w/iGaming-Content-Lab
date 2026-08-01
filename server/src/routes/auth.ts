@@ -81,8 +81,10 @@ authRoutes.get('/status', (c) => {
   try {
     getSupabase()
     return c.json({ ok: true, configured: true })
-  } catch {
-    return c.json({ ok: true, configured: false })
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Supabase не настроен'
+    console.warn('[auth.status]', reason)
+    return c.json({ ok: true, configured: false, reason })
   }
 })
 
