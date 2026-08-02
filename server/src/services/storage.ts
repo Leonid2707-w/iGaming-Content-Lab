@@ -31,6 +31,84 @@ function isAllowedMime(mime: string) {
   return ALLOWED_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix))
 }
 
+export type OrderUploadSlot = {
+  name: string
+  path: string
+  mime: string
+  size: number
+  signedUrl: string
+  token: string
+}
+
+export function assertOrderFileMeta(input: {
+  name?: string
+  mime?: string
+  size?: number
+}): { name: string; mime: string; size: number } | string {
+  const name = String(input.name || '').trim() || 'file'
+  const mime = String(input.mime || 'application/octet-stream')
+  const size = Number(input.size || 0)
+  if (!isAllowedMime(mime)) return `${name}: недопустимый тип файла`
+  if (!Number.isFinite(size) || size <= 0) return `${name}: пустой файл`
+  if (size > MAX_ORDER_FILE_BYTES) return `${name}: слишком большой файл (макс. 50 МБ)`
+  return { name, mime, size }
+}
+
+/** Signed PUT URLs so the browser uploads straight to Supabase (bypasses Vercel 4.5 MB body limit). */
+export async function createOrderUploadSlots(
+  orderPublicId: string,
+  files: { name: string; mime: string; size: number }[],
+): Promise<{ slots: OrderUploadSlot[]; errors: string[] }> {
+  const supabase = getSupabase()
+  const slots: OrderUploadSlot[] = []
+  const errors: string[] = []
+
+  for (const file of files) {
+    const checked = assertOrderFileMeta(file)
+    if (typeof checked === 'string') {
+      errors.push(checked)
+      continue
+    }
+    const fileId = randomUUID()
+    const path = `${orderPublicId}/${fileId}-${safeName(checked.name)}`
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(path)
+    if (error || !data?.signedUrl || !data.token) {
+      errors.push(`${checked.name}: ${error?.message || 'не удалось создать ссылку загрузки'}`)
+      continue
+    }
+    slots.push({
+      name: checked.name,
+      path: data.path || path,
+      mime: checked.mime,
+      size: checked.size,
+      signedUrl: data.signedUrl,
+      token: data.token,
+    })
+  }
+
+  return { slots, errors }
+}
+
+export async function buildOrderFilesFromPaths(
+  files: { name: string; path: string; mime: string; size: number }[],
+): Promise<OrderFile[]> {
+  const supabase = getSupabase()
+  const result: OrderFile[] = []
+  for (const file of files) {
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUrl(file.path, SIGNED_TTL_SEC)
+    result.push({
+      name: file.name,
+      path: file.path,
+      url: !error && data?.signedUrl ? data.signedUrl : '',
+      mime: file.mime,
+      size: file.size,
+    })
+  }
+  return result
+}
+
 async function saveToSupabase(
   orderPublicId: string,
   buffer: Buffer,

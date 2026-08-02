@@ -32,7 +32,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { EditableQuantity } from '@/components/ui/EditableQuantity'
 import { FormField, inputClass } from '@/components/ui/FormField'
-import { submitOrderRequest } from '@/api/orders'
+import { submitOrderWithFiles } from '@/api/orders'
 import {
   calcSocialCreativeMonthly,
   calcTelegramManagementMonthly,
@@ -553,35 +553,34 @@ export function OrderModal() {
           : `${formatMoney(orderTotal)}$`
         : undefined
 
-    const formData = new FormData()
-    formData.set('clientTelegram', telegram.trim())
-    formData.set('serviceId', isVideoOrder && videoType ? videoType : selectedId)
-    formData.set('serviceTitle', serviceTitle)
-    formData.set('companyWebsite', '') // honeypot
-    if (platformLabel) formData.set('platform', platformLabel)
-    if (quantityLabel) formData.set('quantityLabel', quantityLabel)
-    if (isVideoOrder || showQuantity) formData.set('quantity', String(quantity))
-    if (orderTotal !== undefined) formData.set('price', String(orderTotal))
-    if (priceLabel) formData.set('priceLabel', priceLabel)
-    formData.set('description', description.trim())
     const referencesCombined = [
       references.trim() ? `Примеры и референсы:\n${references.trim()}` : '',
       styleText.trim() ? `Стиль:\n${styleText.trim()}` : '',
     ]
       .filter(Boolean)
       .join('\n\n')
-    formData.set('referencesText', referencesCombined)
     // Include unsubmitted draft link so it is not lost if user forgot "Добавить"
     const linksToSend = [...links]
     const draftNormalized = normalizeClientLink(linkDraft)
     if (draftNormalized && isValidUrl(draftNormalized) && !linksToSend.includes(draftNormalized)) {
       linksToSend.push(draftNormalized)
     }
-    formData.set('links', JSON.stringify(linksToSend))
-    if (linkDraft.trim()) formData.set('linkDraft', linkDraft.trim())
-    formData.set(
-      'meta',
-      JSON.stringify({
+
+    const payload = {
+      companyWebsite: '',
+      clientTelegram: telegram.trim(),
+      serviceId: isVideoOrder && videoType ? videoType : selectedId,
+      serviceTitle,
+      platform: platformLabel || '',
+      quantityLabel: quantityLabel || '',
+      quantity: isVideoOrder || showQuantity ? quantity : undefined,
+      price: orderTotal,
+      priceLabel: priceLabel || '',
+      description: description.trim(),
+      referencesText: referencesCombined,
+      links: linksToSend,
+      linkDraft: linkDraft.trim(),
+      meta: {
         weeklyMode: isSocial && platform === 'telegram' ? weeklyMode : undefined,
         weeklyCount: isSocial && platform === 'telegram' ? weeklyCount : undefined,
         weeklyCustomNote:
@@ -594,21 +593,25 @@ export function OrderModal() {
         videoType: isVideoOrder ? videoType : undefined,
         videoQuantity: isVideoOrder ? quantity : undefined,
         pricePer10: isVideoOrder && videoSettings ? videoSettings.pricePer10 : undefined,
-      }),
-    )
-    for (const file of files) formData.append('files', file)
+      },
+    }
 
     setSubmitting(true)
     setUploadProgress(files.length ? 0 : null)
     setError('')
     try {
-      const result = await submitOrderRequest(formData, accessToken, {
-        onProgress: files.length ? setUploadProgress : undefined,
-        retries: 1,
-      })
+      const result = await submitOrderWithFiles(
+        payload,
+        files,
+        accessToken,
+        files.length ? setUploadProgress : undefined,
+      )
       if (!result.ok) {
         setError(result.error || 'Не удалось отправить заявку')
         return
+      }
+      if (result.warning) {
+        console.warn('[order.files]', result.warning)
       }
       setSubmittedPublicId(result.order?.publicId || '')
       setStep('success')

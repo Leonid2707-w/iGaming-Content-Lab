@@ -29,7 +29,7 @@ Run in order from `supabase/migrations/`:
 
 Ensure Storage bucket `order-files` exists (private).
 
-Note: Vercel serverless request body is ~4.5 MB; local/API Node can accept up to 50 MB.
+Note: Order files upload directly to Supabase via signed URLs (up to 50 MB each), so Vercel’s ~4.5 MB request body limit does not block attachments.
 
 ## Local
 ```bash

@@ -21809,6 +21809,9 @@ var init_supabase = __esm({
 var storage_exports = {};
 __export(storage_exports, {
   MAX_ORDER_FILE_BYTES: () => MAX_ORDER_FILE_BYTES,
+  assertOrderFileMeta: () => assertOrderFileMeta,
+  buildOrderFilesFromPaths: () => buildOrderFilesFromPaths,
+  createOrderUploadSlots: () => createOrderUploadSlots,
   isLocalUploadPath: () => isLocalUploadPath,
   refreshSignedUrls: () => refreshSignedUrls,
   resolveLocalUploadPath: () => resolveLocalUploadPath,
@@ -21824,6 +21827,58 @@ function isAllowedMime(mime) {
   if (!mime) return true;
   if (ALLOWED_MIME_EXACT.has(mime)) return true;
   return ALLOWED_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
+}
+function assertOrderFileMeta(input) {
+  const name = String(input.name || "").trim() || "file";
+  const mime = String(input.mime || "application/octet-stream");
+  const size = Number(input.size || 0);
+  if (!isAllowedMime(mime)) return `${name}: \u043D\u0435\u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u044B\u0439 \u0442\u0438\u043F \u0444\u0430\u0439\u043B\u0430`;
+  if (!Number.isFinite(size) || size <= 0) return `${name}: \u043F\u0443\u0441\u0442\u043E\u0439 \u0444\u0430\u0439\u043B`;
+  if (size > MAX_ORDER_FILE_BYTES) return `${name}: \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u0431\u043E\u043B\u044C\u0448\u043E\u0439 \u0444\u0430\u0439\u043B (\u043C\u0430\u043A\u0441. 50 \u041C\u0411)`;
+  return { name, mime, size };
+}
+async function createOrderUploadSlots(orderPublicId, files) {
+  const supabase = getSupabase();
+  const slots = [];
+  const errors = [];
+  for (const file of files) {
+    const checked = assertOrderFileMeta(file);
+    if (typeof checked === "string") {
+      errors.push(checked);
+      continue;
+    }
+    const fileId = randomUUID();
+    const path = `${orderPublicId}/${fileId}-${safeName(checked.name)}`;
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(path);
+    if (error || !data?.signedUrl || !data.token) {
+      errors.push(`${checked.name}: ${error?.message || "\u043D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0441\u0441\u044B\u043B\u043A\u0443 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438"}`);
+      continue;
+    }
+    slots.push({
+      name: checked.name,
+      path: data.path || path,
+      mime: checked.mime,
+      size: checked.size,
+      signedUrl: data.signedUrl,
+      token: data.token
+    });
+  }
+  return { slots, errors };
+}
+async function buildOrderFilesFromPaths(files) {
+  const supabase = getSupabase();
+  const result = [];
+  for (const file of files) {
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(file.path, SIGNED_TTL_SEC);
+    result.push({
+      name: file.name,
+      path: file.path,
+      url: !error && data?.signedUrl ? data.signedUrl : "",
+      mime: file.mime,
+      size: file.size
+    });
+  }
+  return result;
 }
 async function saveToSupabase(orderPublicId, buffer, originalName, mime) {
   const supabase = getSupabase();
@@ -28164,6 +28219,7 @@ servicesAdminRoutes.put(
 init_storage();
 function parseMeta(raw2) {
   if (!raw2) return {};
+  if (typeof raw2 === "object") return raw2;
   try {
     const parsed = JSON.parse(raw2);
     return parsed && typeof parsed === "object" ? parsed : {};
@@ -28180,6 +28236,44 @@ function formatPriceLabel(price, prefix, unitLabel) {
   const withPrefix = prefix ? `${prefix} ${amount}` : amount;
   return unitLabel ? `${withPrefix} ${unitLabel}` : withPrefix;
 }
+async function resolvePricing(input) {
+  const catalogService = input.serviceId ? await getServiceById(input.serviceId) : null;
+  const serviceTitle = catalogService?.title || input.serviceTitle || "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u0430\u044F \u0437\u0430\u044F\u0432\u043A\u0430";
+  let price = null;
+  let priceLabel;
+  if (catalogService && catalogService.priceMode === "numeric" && typeof catalogService.price === "number") {
+    const unitPrice = Number(catalogService.price);
+    const qty = Number.isFinite(input.quantityRaw) && input.quantityRaw > 0 ? input.quantityRaw : Number(catalogService.minimum) || 1;
+    const prefix = typeof catalogService.pricePrefix === "string" ? catalogService.pricePrefix : "";
+    if (catalogService.unit === "piece" || catalogService.unitId === "per_piece") {
+      price = Math.round(unitPrice * qty * 100) / 100;
+      priceLabel = formatPriceLabel(price, prefix, `\u0437\u0430 ${qty} \u0448\u0442.`);
+    } else {
+      price = unitPrice;
+      priceLabel = formatPriceLabel(price, prefix, String(catalogService.unitLabel || ""));
+    }
+  } else if (catalogService?.priceMode === "text") {
+    price = null;
+    priceLabel = String(catalogService.priceText || "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u043E");
+  } else {
+    const clientPrice = Number(input.priceRaw || "");
+    price = Number.isFinite(clientPrice) ? clientPrice : null;
+    priceLabel = input.priceLabel || void 0;
+  }
+  return { serviceTitle, price, priceLabel };
+}
+async function notifyOrder(orderId) {
+  let order = await getOrderById(orderId);
+  if (!order) throw new Error("\u0417\u0430\u044F\u0432\u043A\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430");
+  const telegram = await sendTelegramOrderNotification(order);
+  order = await updateOrderTelegramResult(order.id, {
+    sent: telegram.ok,
+    error: telegram.error
+  });
+  if (!telegram.ok) console.warn("[orders.telegram]", telegram.error);
+  void syncOrderToSheets(order);
+  return { order, telegram };
+}
 var ordersPublicRoutes = new Hono2();
 ordersPublicRoutes.use("*", optionalUserAuth);
 ordersPublicRoutes.post("/", async (c) => {
@@ -28192,9 +28286,80 @@ ordersPublicRoutes.post("/", async (c) => {
         429
       );
     }
-    const form = await c.req.formData();
+    const contentType = c.req.header("content-type") || "";
     const user = c.get("user");
-    if (String(form.get("companyWebsite") || form.get("website") || "").trim()) {
+    let input;
+    const legacyFiles = [];
+    if (contentType.includes("application/json")) {
+      const body = await readJsonBody(c.req, {
+        companyWebsite: "",
+        website: "",
+        clientTelegram: "",
+        serviceId: "",
+        serviceTitle: "",
+        platform: "",
+        quantityLabel: "",
+        quantity: 0,
+        price: "",
+        priceLabel: "",
+        description: "",
+        referencesText: "",
+        links: "[]",
+        linkDraft: "",
+        meta: {},
+        files: []
+      });
+      input = {
+        honeypot: String(body.companyWebsite || body.website || ""),
+        clientTelegram: String(body.clientTelegram || "").trim(),
+        serviceId: String(body.serviceId || "").trim(),
+        serviceTitle: String(body.serviceTitle || "").trim(),
+        platform: String(body.platform || ""),
+        quantityLabel: String(body.quantityLabel || ""),
+        quantityRaw: Number(body.quantity || 0),
+        priceRaw: String(body.price ?? ""),
+        priceLabel: String(body.priceLabel || ""),
+        description: String(body.description || "").trim(),
+        referencesText: String(body.referencesText || ""),
+        linksJson: typeof body.links === "string" ? body.links : JSON.stringify(body.links || []),
+        linkDraft: String(body.linkDraft || ""),
+        meta: parseMeta(body.meta),
+        fileMeta: Array.isArray(body.files) ? body.files.map((item) => assertOrderFileMeta(item || {})).filter((item) => typeof item !== "string") : []
+      };
+      if (Array.isArray(body.files)) {
+        const metaErrors = body.files.map((item) => assertOrderFileMeta(item || {})).filter((item) => typeof item === "string");
+        if (metaErrors.length && !input.fileMeta.length) {
+          return c.json({ ok: false, error: metaErrors.join("; ") }, 400);
+        }
+      }
+    } else {
+      const form = await c.req.formData();
+      input = {
+        honeypot: String(form.get("companyWebsite") || form.get("website") || "").trim(),
+        clientTelegram: String(form.get("clientTelegram") || "").trim(),
+        serviceId: String(form.get("serviceId") || "").trim(),
+        serviceTitle: String(form.get("serviceTitle") || "").trim(),
+        platform: String(form.get("platform") || ""),
+        quantityLabel: String(form.get("quantityLabel") || ""),
+        quantityRaw: Number(form.get("quantity") || form.get("qty") || 0),
+        priceRaw: String(form.get("price") || ""),
+        priceLabel: String(form.get("priceLabel") || ""),
+        description: String(form.get("description") || "").trim(),
+        referencesText: String(form.get("referencesText") || ""),
+        linksJson: String(form.get("links") || ""),
+        linkDraft: String(form.get("linkDraft") || ""),
+        meta: parseMeta(String(form.get("meta") || "")),
+        fileMeta: []
+      };
+      for (const item of form.getAll("files")) {
+        if (typeof item === "string") continue;
+        const candidate = item;
+        if (typeof candidate.arrayBuffer === "function" && Number(candidate.size) > 0) {
+          legacyFiles.push(candidate);
+        }
+      }
+    }
+    if (input.honeypot) {
       return c.json({ ok: true, order: { id: "ok", publicId: "ok", telegramSent: false } });
     }
     if (!user) {
@@ -28207,91 +28372,68 @@ ordersPublicRoutes.post("/", async (c) => {
         401
       );
     }
-    const clientTelegram = String(form.get("clientTelegram") || "").trim();
-    const serviceId = String(form.get("serviceId") || "").trim();
-    const description = String(form.get("description") || "").trim();
-    const referencesText = String(form.get("referencesText") || "");
-    const quantityRaw = Number(form.get("quantity") || form.get("qty") || 0);
-    if (!clientTelegram) {
+    if (!input.clientTelegram) {
       return c.json({ ok: false, error: "\u0423\u043A\u0430\u0436\u0438\u0442\u0435 Telegram username" }, 400);
     }
-    if (!description) {
+    if (!input.description) {
       return c.json({ ok: false, error: "\u041E\u043F\u0438\u0448\u0438\u0442\u0435 \u0437\u0430\u0434\u0430\u0447\u0443" }, 400);
     }
-    const catalogService = serviceId ? await getServiceById(serviceId) : null;
-    const clientTitle = String(form.get("serviceTitle") || "").trim();
-    const serviceTitle = catalogService?.title || clientTitle || "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u0430\u044F \u0437\u0430\u044F\u0432\u043A\u0430";
-    let price = null;
-    let priceLabel;
-    if (catalogService && catalogService.priceMode === "numeric" && typeof catalogService.price === "number") {
-      const unitPrice = Number(catalogService.price);
-      const qty = Number.isFinite(quantityRaw) && quantityRaw > 0 ? quantityRaw : Number(catalogService.minimum) || 1;
-      const prefix = typeof catalogService.pricePrefix === "string" ? catalogService.pricePrefix : "";
-      if (catalogService.unit === "piece" || catalogService.unitId === "per_piece") {
-        price = Math.round(unitPrice * qty * 100) / 100;
-        priceLabel = formatPriceLabel(price, prefix, `\u0437\u0430 ${qty} \u0448\u0442.`);
-      } else {
-        price = unitPrice;
-        priceLabel = formatPriceLabel(
-          price,
-          prefix,
-          String(catalogService.unitLabel || "")
-        );
-      }
-    } else if (catalogService?.priceMode === "text") {
-      price = null;
-      priceLabel = String(catalogService.priceText || "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u043E");
-    } else {
-      const clientPrice = Number(form.get("price") || "");
-      price = Number.isFinite(clientPrice) ? clientPrice : null;
-      priceLabel = String(form.get("priceLabel") || "") || void 0;
-    }
-    const incomingFiles = [];
-    for (const item of form.getAll("files")) {
-      if (typeof item === "string") continue;
-      const candidate = item;
-      if (typeof candidate.arrayBuffer === "function" && Number(candidate.size) > 0) {
-        incomingFiles.push(candidate);
-      }
-    }
-    if (incomingFiles.length > 12) {
+    if (legacyFiles.length > 12 || input.fileMeta.length > 12) {
       return c.json({ ok: false, error: "\u041C\u043E\u0436\u043D\u043E \u043F\u0440\u0438\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u043D\u0435 \u0431\u043E\u043B\u0435\u0435 12 \u0444\u0430\u0439\u043B\u043E\u0432" }, 400);
     }
-    for (const file of incomingFiles) {
+    for (const file of legacyFiles) {
       if (file.size > MAX_ORDER_FILE_BYTES) {
         return c.json({ ok: false, error: `\u0424\u0430\u0439\u043B \xAB${file.name}\xBB \u0431\u043E\u043B\u044C\u0448\u0435 50 \u041C\u0411` }, 400);
       }
     }
+    const { serviceTitle, price, priceLabel } = await resolvePricing(input);
     const links = collectOrderLinks({
-      linksJson: String(form.get("links") || ""),
-      referencesText,
-      description,
-      linkDraft: String(form.get("linkDraft") || "")
+      linksJson: input.linksJson,
+      referencesText: input.referencesText,
+      description: input.description,
+      linkDraft: input.linkDraft
     });
     let order = await createOrder({
       userId: user.id,
-      clientTelegram,
-      serviceId: serviceId || void 0,
+      clientTelegram: input.clientTelegram,
+      serviceId: input.serviceId || void 0,
       serviceTitle,
-      platform: String(form.get("platform") || "") || void 0,
-      quantityLabel: String(form.get("quantityLabel") || "") || void 0,
+      platform: input.platform || void 0,
+      quantityLabel: input.quantityLabel || void 0,
       price,
       priceLabel,
-      description,
-      referencesText,
+      description: input.description,
+      referencesText: input.referencesText,
       links,
-      meta: parseMeta(String(form.get("meta") || ""))
+      meta: input.meta
     });
+    if (input.fileMeta.length) {
+      const { slots, errors } = await createOrderUploadSlots(order.public_id, input.fileMeta);
+      if (slots.length) {
+        return c.json({
+          ok: true,
+          needsFinalize: true,
+          order: {
+            id: order.id,
+            publicId: order.public_id,
+            telegramSent: false,
+            filesCount: 0,
+            linksCount: order.links.length
+          },
+          uploadSlots: slots,
+          warning: errors.length ? errors.join("; ") : void 0
+        });
+      }
+      console.warn("[orders.uploadSlots]", errors);
+    }
     let fileWarning = "";
-    if (incomingFiles.length) {
+    if (legacyFiles.length) {
       try {
         const { files: uploaded, errors: fileErrors } = await uploadOrderFiles(
           order.public_id,
-          incomingFiles
+          legacyFiles
         );
-        if (uploaded.length) {
-          order = await updateOrderFiles(order.id, uploaded);
-        }
+        if (uploaded.length) order = await updateOrderFiles(order.id, uploaded);
         if (fileErrors.length) {
           fileWarning = fileErrors.join("; ");
           console.warn("[orders.files]", fileErrors);
@@ -28301,33 +28443,68 @@ ordersPublicRoutes.post("/", async (c) => {
         console.warn("[orders.files]", fileError);
       }
     }
-    const telegram = await sendTelegramOrderNotification(order);
-    order = await updateOrderTelegramResult(order.id, {
-      sent: telegram.ok,
-      error: telegram.error
-    });
-    if (!telegram.ok) {
-      console.warn("[orders.telegram]", telegram.error);
-    }
-    void syncOrderToSheets(order);
+    const { order: notified, telegram } = await notifyOrder(order.id);
     return c.json({
       ok: true,
+      needsFinalize: false,
       order: {
-        id: order.id,
-        publicId: order.public_id,
+        id: notified.id,
+        publicId: notified.public_id,
         telegramSent: telegram.ok,
-        filesCount: order.files.length,
-        linksCount: order.links.length
+        filesCount: notified.files.length,
+        linksCount: notified.links.length
       },
       warning: fileWarning || void 0
     });
   } catch (error) {
     console.error("[orders.create]", error);
     const raw2 = error instanceof Error ? error.message : String(error);
+    return c.json({ ok: false, error: raw2 || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0437\u0430\u044F\u0432\u043A\u0443" }, 500);
+  }
+});
+ordersPublicRoutes.post("/:id/finalize", async (c) => {
+  try {
+    const user = c.get("user");
+    if (!user) {
+      return c.json({ ok: false, error: "\u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044F \u0430\u0432\u0442\u043E\u0440\u0438\u0437\u0430\u0446\u0438\u044F", code: "AUTH_REQUIRED" }, 401);
+    }
+    const order = await getOrderById(c.req.param("id"));
+    if (!order) return c.json({ ok: false, error: "\u0417\u0430\u044F\u0432\u043A\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430" }, 404);
+    if (order.user_id && order.user_id !== user.id) {
+      return c.json({ ok: false, error: "\u041D\u0435\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u0430 \u043A \u0437\u0430\u044F\u0432\u043A\u0435" }, 403);
+    }
+    const body = await readJsonBody(c.req, {
+      files: []
+    });
+    const prefix = `${order.public_id}/`;
+    const accepted = (Array.isArray(body.files) ? body.files : []).map((item) => ({
+      name: String(item.name || "file"),
+      path: String(item.path || ""),
+      mime: String(item.mime || "application/octet-stream"),
+      size: Number(item.size || 0)
+    })).filter((item) => item.path.startsWith(prefix) && item.size > 0);
+    let updated = order;
+    if (accepted.length) {
+      const files = await buildOrderFilesFromPaths(accepted);
+      updated = await updateOrderFiles(order.id, files);
+    }
+    const { order: notified, telegram } = await notifyOrder(updated.id);
+    return c.json({
+      ok: true,
+      order: {
+        id: notified.id,
+        publicId: notified.public_id,
+        telegramSent: telegram.ok,
+        filesCount: notified.files.length,
+        linksCount: notified.links.length
+      }
+    });
+  } catch (error) {
+    console.error("[orders.finalize]", error);
     return c.json(
       {
         ok: false,
-        error: raw2 || "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0437\u0430\u044F\u0432\u043A\u0443"
+        error: error instanceof Error ? error.message : "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0443 \u0444\u0430\u0439\u043B\u043E\u0432"
       },
       500
     );

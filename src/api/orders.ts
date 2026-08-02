@@ -45,89 +45,162 @@ export interface OrderHistoryDto {
   created_at: string
 }
 
+export type OrderUploadSlot = {
+  name: string
+  path: string
+  mime: string
+  size: number
+  signedUrl: string
+  token: string
+}
+
+type SubmitOrderResult = {
+  ok: boolean
+  needsFinalize?: boolean
+  order?: {
+    id: string
+    publicId: string
+    telegramSent: boolean
+    filesCount?: number
+    linksCount?: number
+  }
+  uploadSlots?: OrderUploadSlot[]
+  warning?: string
+  error?: string
+  code?: string
+}
+
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 async function parseJson<T>(response: Response): Promise<T> {
-  const data = (await response.json()) as T & { ok?: boolean; error?: string }
+  if (response.status === 413) {
+    throw new Error(
+      'Файл слишком большой для сервера (лимит хостинга). Попробуйте файл меньше или без вложений — мы уже поддерживаем прямую загрузку до 50 МБ.',
+    )
+  }
+  let data: T & { ok?: boolean; error?: string }
+  try {
+    data = (await response.json()) as T & { ok?: boolean; error?: string }
+  } catch {
+    throw new Error(response.status === 413 ? 'Слишком большой запрос (HTTP 413)' : `HTTP ${response.status}`)
+  }
   if (!response.ok) {
     throw new Error((data as { error?: string }).error || `HTTP ${response.status}`)
   }
   return data
 }
 
-type SubmitOrderResult = {
-  ok: boolean
-  order?: { id: string; publicId: string; telegramSent: boolean }
-  warning?: string
-  error?: string
-  code?: string
+export async function submitOrderJson(
+  payload: Record<string, unknown>,
+  accessToken?: string | null,
+) {
+  const headers: HeadersInit = { 'Content-Type': 'application/json' }
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+
+  const response = await fetch(`${API_BASE}/orders`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  })
+  return parseJson<SubmitOrderResult>(response)
 }
 
-function xhrSubmitOrder(
-  formData: FormData,
-  accessToken: string | null | undefined,
+export async function uploadToSignedSlot(
+  slot: OrderUploadSlot,
+  file: File,
   onProgress?: (percent: number) => void,
-): Promise<SubmitOrderResult> {
-  return new Promise((resolve, reject) => {
+) {
+  await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `${API_BASE}/orders`)
-    if (accessToken) xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`)
+    xhr.open('PUT', slot.signedUrl)
+    xhr.setRequestHeader('Content-Type', file.type || slot.mime || 'application/octet-stream')
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || !onProgress) return
       onProgress(Math.round((event.loaded / event.total) * 100))
     }
     xhr.onload = () => {
-      try {
-        const data = JSON.parse(xhr.responseText || '{}') as SubmitOrderResult
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(data)
-          return
-        }
-        reject(new Error(data.error || `HTTP ${xhr.status}`))
-      } catch {
-        reject(new Error(`HTTP ${xhr.status}`))
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve()
+        return
       }
+      reject(new Error(`Не удалось загрузить «${file.name}» (HTTP ${xhr.status})`))
     }
-    xhr.onerror = () => reject(new Error('Сеть недоступна'))
-    xhr.send(formData)
+    xhr.onerror = () => reject(new Error(`Сеть недоступна при загрузке «${file.name}»`))
+    xhr.send(file)
   })
 }
 
-export async function submitOrderRequest(
-  formData: FormData,
+export async function finalizeOrderRequest(
+  orderId: string,
+  files: { name: string; path: string; mime: string; size: number }[],
   accessToken?: string | null,
-  options?: { onProgress?: (percent: number) => void; retries?: number },
 ) {
-  const retries = options?.retries ?? 1
-  let lastError: Error | null = null
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      options?.onProgress?.(0)
-      const result = await xhrSubmitOrder(formData, accessToken, options?.onProgress)
-      options?.onProgress?.(100)
-      return result
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error('Ошибка отправки')
-      const retryable = /сеть|network|failed|HTTP 5/i.test(lastError.message)
-      if (!retryable || attempt >= retries) break
-      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)))
-    }
-  }
-  throw lastError || new Error('Не удалось отправить заявку')
+  const headers: HeadersInit = { 'Content-Type': 'application/json' }
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
+
+  const response = await fetch(`${API_BASE}/orders/${orderId}/finalize`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ files }),
+  })
+  return parseJson<SubmitOrderResult>(response)
 }
 
-export class AdminAuthError extends Error {
-  constructor(message = 'Сессия администратора истекла') {
-    super(message)
-    this.name = 'AdminAuthError'
-  }
-}
+/** Full flow: create order → upload files to Supabase → finalize notifications. */
+export async function submitOrderWithFiles(
+  payload: Record<string, unknown>,
+  files: File[],
+  accessToken?: string | null,
+  onProgress?: (percent: number) => void,
+) {
+  const create = await submitOrderJson(
+    {
+      ...payload,
+      files: files.map((file) => ({
+        name: file.name,
+        mime: file.type || 'application/octet-stream',
+        size: file.size,
+      })),
+    },
+    accessToken,
+  )
 
-async function parseAdminJson<T>(response: Response): Promise<T> {
-  if (response.status === 401) {
-    throw new AdminAuthError()
+  if (!create.ok || !create.order) {
+    throw new Error(create.error || 'Не удалось создать заявку')
   }
-  return parseJson<T>(response)
+
+  if (!create.needsFinalize || !create.uploadSlots?.length) {
+    onProgress?.(100)
+    return create
+  }
+
+  onProgress?.(5)
+
+  const uploaded: { name: string; path: string; mime: string; size: number }[] = []
+  const slots = create.uploadSlots
+  for (let i = 0; i < slots.length; i += 1) {
+    const slot = slots[i]
+    const file =
+      files.find((item) => item.name === slot.name && item.size === slot.size) || files[i]
+    if (!file) continue
+    await uploadToSignedSlot(slot, file, (filePercent) => {
+      const overall = Math.round(((i + filePercent / 100) / slots.length) * 100)
+      onProgress?.(overall)
+    })
+    uploaded.push({
+      name: slot.name,
+      path: slot.path,
+      mime: slot.mime,
+      size: slot.size,
+    })
+  }
+
+  const finalized = await finalizeOrderRequest(create.order.id, uploaded, accessToken)
+  onProgress?.(100)
+  if (create.warning && finalized.ok) {
+    return { ...finalized, warning: create.warning }
+  }
+  return finalized
 }
 
 export async function adminLoginRequest(login: string, password: string) {
@@ -148,6 +221,20 @@ export async function adminLoginRequest(login: string, password: string) {
       permissions: string[]
     }
   }>(response)
+}
+
+export class AdminAuthError extends Error {
+  constructor(message = 'Сессия администратора истекла') {
+    super(message)
+    this.name = 'AdminAuthError'
+  }
+}
+
+async function parseAdminJson<T>(response: Response): Promise<T> {
+  if (response.status === 401) {
+    throw new AdminAuthError()
+  }
+  return parseJson<T>(response)
 }
 
 function authHeaders(token: string) {
