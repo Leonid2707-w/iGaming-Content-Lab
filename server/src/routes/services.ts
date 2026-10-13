@@ -6,7 +6,7 @@ export type ServicePayload = Record<string, unknown> & { id: string }
 
 const STORAGE_KEY = 'catalog'
 
-async function readCatalog(): Promise<ServicePayload[] | null> {
+export async function readCatalog(): Promise<ServicePayload[] | null> {
   try {
     const supabase = getSupabase()
     const { data, error } = await supabase

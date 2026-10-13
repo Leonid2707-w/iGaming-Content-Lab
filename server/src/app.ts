@@ -12,6 +12,7 @@ import { ordersPublicRoutes } from './routes/orders.js'
 import { portfolioAdminRoutes } from './routes/portfolio.js'
 import { servicesAdminRoutes, servicesPublicRoutes } from './routes/services.js'
 import { partnersPublicRoutes } from './routes/partners.js'
+import { telegramBotRoutes } from './routes/telegramBot.js'
 import { visitsPublicRoutes } from './routes/visits.js'
 
 try {
@@ -63,6 +64,7 @@ app.get('/api/health', (c) =>
     runtime: process.env.VERCEL ? 'vercel' : 'node',
     supabaseConfigured: Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey),
     telegramConfigured: Boolean(serverEnv.telegramBotToken && serverEnv.telegramAdminId),
+    botWebhookConfigured: Boolean(serverEnv.telegramBotToken && serverEnv.telegramWebhookSecret),
     sheetsConfigured: Boolean(
       serverEnv.googleSheetsWebhookUrl && serverEnv.googleSheetsWebhookSecret,
     ),
@@ -81,6 +83,7 @@ app.route('/api/admin/portfolio', portfolioAdminRoutes)
 app.route('/api/admin/users', adminUsersRoutes)
 app.route('/api/admin/services', servicesAdminRoutes)
 app.route('/api/files', filesPublicRoutes)
+app.route('/api/telegram', telegramBotRoutes)
 
 app.notFound((c) => {
   if (c.req.path.startsWith('/api')) {
