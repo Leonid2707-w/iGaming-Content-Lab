@@ -422,6 +422,9 @@ var init_env = __esm({
       supabaseServiceRoleKey: required("SUPABASE_SERVICE_ROLE_KEY"),
       telegramBotToken: required("TELEGRAM_BOT_TOKEN"),
       telegramAdminId: required("TELEGRAM_ADMIN_ID"),
+      /** Secret for `X-Telegram-Bot-Api-Secret-Token` on the bot webhook. */
+      telegramWebhookSecret: required("TELEGRAM_WEBHOOK_SECRET"),
+      telegramSupportUrl: required("TELEGRAM_SUPPORT_URL") || "https://t.me/ICLsupport",
       /** Optional custom HTML template with {placeholders}. Use \n for newlines in .env */
       telegramOrderTemplate: required("TELEGRAM_ORDER_TEMPLATE")?.replaceAll("\\n", "\n"),
       googleSheetsWebhookUrl: required("GOOGLE_SHEETS_WEBHOOK_URL"),
@@ -13025,19 +13028,19 @@ var require_base64url = __commonJS({
         throw new Error(`Invalid Base64-URL character "${String.fromCharCode(charCode)}"`);
       }
     }
-    function stringToBase64URL(str) {
+    function stringToBase64URL(str2) {
       const base64 = [];
       const emitter = (char) => {
         base64.push(char);
       };
       const state = { queue: 0, queuedBits: 0 };
-      stringToUTF8(str, (byte) => {
+      stringToUTF8(str2, (byte) => {
         byteToBase64URL(byte, state, emitter);
       });
       byteToBase64URL(null, state, emitter);
       return base64.join("");
     }
-    function stringFromBase64URL(str) {
+    function stringFromBase64URL(str2) {
       const conv = [];
       const utf8Emit = (codepoint) => {
         conv.push(String.fromCodePoint(codepoint));
@@ -13050,8 +13053,8 @@ var require_base64url = __commonJS({
       const byteEmit = (byte) => {
         stringFromUTF8(byte, utf8State, utf8Emit);
       };
-      for (let i = 0; i < str.length; i += 1) {
-        byteFromBase64URL(str.charCodeAt(i), b64State, byteEmit);
+      for (let i = 0; i < str2.length; i += 1) {
+        byteFromBase64URL(str2.charCodeAt(i), b64State, byteEmit);
       }
       return conv.join("");
     }
@@ -13077,12 +13080,12 @@ var require_base64url = __commonJS({
       }
       throw new Error(`Unrecognized Unicode codepoint: ${codepoint.toString(16)}`);
     }
-    function stringToUTF8(str, emit) {
-      for (let i = 0; i < str.length; i += 1) {
-        let codepoint = str.charCodeAt(i);
+    function stringToUTF8(str2, emit) {
+      for (let i = 0; i < str2.length; i += 1) {
+        let codepoint = str2.charCodeAt(i);
         if (codepoint > 55295 && codepoint <= 56319) {
           const highSurrogate = (codepoint - 55296) * 1024 & 65535;
-          const lowSurrogate = str.charCodeAt(i + 1) - 56320 & 65535;
+          const lowSurrogate = str2.charCodeAt(i + 1) - 56320 & 65535;
           codepoint = (lowSurrogate | highSurrogate) + 65536;
           i += 1;
         }
@@ -13122,20 +13125,20 @@ var require_base64url = __commonJS({
         }
       }
     }
-    function base64UrlToUint8Array(str) {
+    function base64UrlToUint8Array(str2) {
       const result = [];
       const state = { queue: 0, queuedBits: 0 };
       const onByte = (byte) => {
         result.push(byte);
       };
-      for (let i = 0; i < str.length; i += 1) {
-        byteFromBase64URL(str.charCodeAt(i), state, onByte);
+      for (let i = 0; i < str2.length; i += 1) {
+        byteFromBase64URL(str2.charCodeAt(i), state, onByte);
       }
       return new Uint8Array(result);
     }
-    function stringToUint8Array(str) {
+    function stringToUint8Array(str2) {
       const result = [];
-      stringToUTF8(str, (byte) => result.push(byte));
+      stringToUTF8(str2, (byte) => result.push(byte));
       return new Uint8Array(result);
     }
     function bytesToBase64URL(bytes) {
@@ -13414,8 +13417,8 @@ var require_helpers = __commonJS({
       }
     }
     var UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-    function validateUUID(str) {
-      if (!UUID_REGEX.test(str)) {
+    function validateUUID(str2) {
+      if (!UUID_REGEX.test(str2)) {
         throw new Error("@supabase/auth-js: Expected parameter to be UUID but is not");
       }
     }
@@ -21996,16 +21999,16 @@ var compose = (middleware, onError, onNotFound) => {
       index = i;
       let res;
       let isError = false;
-      let handler;
+      let handler2;
       if (middleware[i]) {
-        handler = middleware[i][0][0];
+        handler2 = middleware[i][0][0];
         context.req.routeIndex = i;
       } else {
-        handler = i === middleware.length && next || void 0;
+        handler2 = i === middleware.length && next || void 0;
       }
-      if (handler) {
+      if (handler2) {
         try {
-          res = await handler(context, () => dispatch(i + 1));
+          res = await handler2(context, () => dispatch(i + 1));
         } catch (err) {
           if (err instanceof Error && onError) {
             context.error = err;
@@ -22181,11 +22184,11 @@ var getPattern = (label, next) => {
   }
   return null;
 };
-var tryDecode = (str, decoder) => {
+var tryDecode = (str2, decoder) => {
   try {
-    return decoder(str);
+    return decoder(str2);
   } catch {
-    return str.replace(/(?:%[0-9A-Fa-f]{2})+/g, (match2) => {
+    return str2.replace(/(?:%[0-9A-Fa-f]{2})+/g, (match2) => {
       try {
         return decoder(match2);
       } catch {
@@ -22194,7 +22197,7 @@ var tryDecode = (str, decoder) => {
     });
   }
 };
-var tryDecodeURI = (str) => tryDecode(str, decodeURI);
+var tryDecodeURI = (str2) => tryDecode(str2, decodeURI);
 var getPath = (request) => {
   const url = request.url;
   const start = url.indexOf("/", url.indexOf(":") + 4);
@@ -22333,7 +22336,7 @@ var getQueryParams = (url, key) => {
 var decodeURIComponent_ = decodeURIComponent;
 
 // node_modules/hono/dist/request.js
-var tryDecodeURIComponent = (str) => tryDecode(str, decodeURIComponent_);
+var tryDecodeURIComponent = (str2) => tryDecode(str2, decodeURIComponent_);
 var HonoRequest = class {
   /**
    * `.raw` can get the raw Request object.
@@ -22627,27 +22630,27 @@ var raw = (value, callbacks) => {
   escapedString.callbacks = callbacks;
   return escapedString;
 };
-var resolveCallback = async (str, phase, preserveCallbacks, context, buffer) => {
-  if (typeof str === "object" && !(str instanceof String)) {
-    if (!(str instanceof Promise)) {
-      str = str.toString();
+var resolveCallback = async (str2, phase, preserveCallbacks, context, buffer) => {
+  if (typeof str2 === "object" && !(str2 instanceof String)) {
+    if (!(str2 instanceof Promise)) {
+      str2 = str2.toString();
     }
-    if (str instanceof Promise) {
-      str = await str;
+    if (str2 instanceof Promise) {
+      str2 = await str2;
     }
   }
-  const callbacks = str.callbacks;
+  const callbacks = str2.callbacks;
   if (!callbacks?.length) {
-    return Promise.resolve(str);
+    return Promise.resolve(str2);
   }
   if (buffer) {
-    buffer[0] += str;
+    buffer[0] += str2;
   } else {
-    buffer = [str];
+    buffer = [str2];
   }
   const resStr = Promise.all(callbacks.map((c) => c({ phase, buffer, context }))).then(
     (res) => Promise.all(
-      res.filter(Boolean).map((str2) => resolveCallback(str2, phase, false, context, buffer))
+      res.filter(Boolean).map((str22) => resolveCallback(str22, phase, false, context, buffer))
     ).then(() => buffer[0])
   );
   if (preserveCallbacks) {
@@ -23116,8 +23119,8 @@ var Hono = class _Hono {
         } else {
           this.#addRoute(method, this.#path, args1);
         }
-        args.forEach((handler) => {
-          this.#addRoute(method, this.#path, handler);
+        args.forEach((handler2) => {
+          this.#addRoute(method, this.#path, handler2);
         });
         return this;
       };
@@ -23126,8 +23129,8 @@ var Hono = class _Hono {
       for (const p of [path].flat()) {
         this.#path = p;
         for (const m of [method].flat()) {
-          handlers.map((handler) => {
-            this.#addRoute(m.toUpperCase(), this.#path, handler);
+          handlers.map((handler2) => {
+            this.#addRoute(m.toUpperCase(), this.#path, handler2);
           });
         }
       }
@@ -23140,8 +23143,8 @@ var Hono = class _Hono {
         this.#path = "*";
         handlers.unshift(arg1);
       }
-      handlers.forEach((handler) => {
-        this.#addRoute(METHOD_NAME_ALL, this.#path, handler);
+      handlers.forEach((handler2) => {
+        this.#addRoute(METHOD_NAME_ALL, this.#path, handler2);
       });
       return this;
     };
@@ -23183,14 +23186,14 @@ var Hono = class _Hono {
   route(path, app3) {
     const subApp = this.basePath(path);
     app3.routes.map((r) => {
-      let handler;
+      let handler2;
       if (app3.errorHandler === errorHandler) {
-        handler = r.handler;
+        handler2 = r.handler;
       } else {
-        handler = async (c, next) => (await compose([], app3.errorHandler)(c, () => r.handler(c, next))).res;
-        handler[COMPOSED_HANDLER] = r.handler;
+        handler2 = async (c, next) => (await compose([], app3.errorHandler)(c, () => r.handler(c, next))).res;
+        handler2[COMPOSED_HANDLER] = r.handler;
       }
-      subApp.#addRoute(r.method, r.path, handler, r.basePath);
+      subApp.#addRoute(r.method, r.path, handler2, r.basePath);
     });
     return this;
   }
@@ -23228,8 +23231,8 @@ var Hono = class _Hono {
    * })
    * ```
    */
-  onError = (handler) => {
-    this.errorHandler = handler;
+  onError = (handler2) => {
+    this.errorHandler = handler2;
     return this;
   };
   /**
@@ -23247,8 +23250,8 @@ var Hono = class _Hono {
    * })
    * ```
    */
-  notFound = (handler) => {
-    this.#notFoundHandler = handler;
+  notFound = (handler2) => {
+    this.#notFoundHandler = handler2;
     return this;
   };
   /**
@@ -23318,26 +23321,26 @@ var Hono = class _Hono {
         return new Request(url, request);
       };
     })();
-    const handler = async (c, next) => {
+    const handler2 = async (c, next) => {
       const res = await applicationHandler(replaceRequest(c.req.raw), ...getOptions(c));
       if (res) {
         return res;
       }
       await next();
     };
-    this.#addRoute(METHOD_NAME_ALL, mergePath(path, "*"), handler);
+    this.#addRoute(METHOD_NAME_ALL, mergePath(path, "*"), handler2);
     return this;
   }
-  #addRoute(method, path, handler, baseRoutePath) {
+  #addRoute(method, path, handler2, baseRoutePath) {
     method = method.toUpperCase();
     path = mergePath(this._basePath, path);
     const r = {
       basePath: baseRoutePath !== void 0 ? mergePath(this._basePath, baseRoutePath) : this._basePath,
       path,
       method,
-      handler
+      handler: handler2
     };
-    this.router.add(method, path, [handler, r]);
+    this.router.add(method, path, [handler2, r]);
     this.routes.push(r);
   }
   #handleError(err, c) {
@@ -23726,7 +23729,7 @@ var RegExpRouter = class {
     this.#middleware = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
     this.#routes = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
   }
-  add(method, path, handler) {
+  add(method, path, handler2) {
     const middleware = this.#middleware;
     const routes = this.#routes;
     if (!middleware || !routes) {
@@ -23757,14 +23760,14 @@ var RegExpRouter = class {
       Object.keys(middleware).forEach((m) => {
         if (method === METHOD_NAME_ALL || method === m) {
           Object.keys(middleware[m]).forEach((p) => {
-            re.test(p) && middleware[m][p].push([handler, paramCount]);
+            re.test(p) && middleware[m][p].push([handler2, paramCount]);
           });
         }
       });
       Object.keys(routes).forEach((m) => {
         if (method === METHOD_NAME_ALL || method === m) {
           Object.keys(routes[m]).forEach(
-            (p) => re.test(p) && routes[m][p].push([handler, paramCount])
+            (p) => re.test(p) && routes[m][p].push([handler2, paramCount])
           );
         }
       });
@@ -23778,7 +23781,7 @@ var RegExpRouter = class {
           routes[m][path2] ||= [
             ...findMiddleware(middleware[m], path2) || findMiddleware(middleware[METHOD_NAME_ALL], path2) || []
           ];
-          routes[m][path2].push([handler, paramCount - len + i + 1]);
+          routes[m][path2].push([handler2, paramCount - len + i + 1]);
         }
       });
     }
@@ -23823,11 +23826,11 @@ var SmartRouter = class {
   constructor(init) {
     this.#routers = init.routers;
   }
-  add(method, path, handler) {
+  add(method, path, handler2) {
     if (!this.#routes) {
       throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
     }
-    this.#routes.push([method, path, handler]);
+    this.#routes.push([method, path, handler2]);
   }
   match(method, path) {
     if (!this.#routes) {
@@ -23884,17 +23887,17 @@ var Node2 = class _Node2 {
   #patterns;
   #order = 0;
   #params = emptyParams;
-  constructor(method, handler, children) {
+  constructor(method, handler2, children) {
     this.#children = children || /* @__PURE__ */ Object.create(null);
     this.#methods = [];
-    if (method && handler) {
+    if (method && handler2) {
       const m = /* @__PURE__ */ Object.create(null);
-      m[method] = { handler, possibleKeys: [], score: 0 };
+      m[method] = { handler: handler2, possibleKeys: [], score: 0 };
       this.#methods = [m];
     }
     this.#patterns = [];
   }
-  insert(method, path, handler) {
+  insert(method, path, handler2) {
     this.#order = ++this.#order;
     let curNode = this;
     const parts = splitRoutingPath(path);
@@ -23920,7 +23923,7 @@ var Node2 = class _Node2 {
     }
     curNode.#methods.push({
       [method]: {
-        handler,
+        handler: handler2,
         possibleKeys: possibleKeys.filter((v, i, a) => a.indexOf(v) === i),
         score: this.#order
       }
@@ -24050,7 +24053,7 @@ var Node2 = class _Node2 {
         return a.score - b.score;
       });
     }
-    return [handlerSets.map(({ handler, params }) => [handler, params])];
+    return [handlerSets.map(({ handler: handler2, params }) => [handler2, params])];
   }
 };
 
@@ -24061,15 +24064,15 @@ var TrieRouter = class {
   constructor() {
     this.#node = new Node2();
   }
-  add(method, path, handler) {
+  add(method, path, handler2) {
     const results = checkOptionalParameter(path);
     if (results) {
       for (let i = 0, len = results.length; i < len; i++) {
-        this.#node.insert(method, results[i], handler);
+        this.#node.insert(method, results[i], handler2);
       }
       return;
     }
-    this.#node.insert(method, path, handler);
+    this.#node.insert(method, path, handler2);
   }
   match(method, path) {
     return this.#node.search(method, path);
@@ -26377,6 +26380,15 @@ async function listOrders(params) {
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) => mapOrder(row));
 }
+async function listOrdersForTelegramUser(params) {
+  const filters = [`meta->>telegram_user_id.eq.${Math.trunc(params.telegramUserId)}`];
+  if (params.username && /^[A-Za-z0-9_]{3,32}$/.test(params.username)) {
+    filters.push(`client_telegram.ilike.@${params.username}`, `client_telegram.ilike.${params.username}`);
+  }
+  const { data, error } = await getSupabase().from("orders").select("*").or(filters.join(",")).order("created_at", { ascending: false }).limit(params.limit ?? 10);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => mapOrder(row));
+}
 async function getOrderById(id) {
   const supabase = getSupabase();
   const { data, error } = await supabase.from("orders").select("*").eq("id", id).maybeSingle();
@@ -27043,14 +27055,321 @@ function buildDailySeries(range, visits, orders) {
   return days;
 }
 
-// server/src/lib/jsonBody.ts
-async function readJsonBody(request, fallback) {
+// server/src/bot/index.ts
+init_env();
+init_supabase();
+
+// server/src/routes/services.ts
+init_supabase();
+var STORAGE_KEY = "catalog";
+async function readCatalog() {
   try {
-    const body = await request.json();
-    return body && typeof body === "object" ? body : fallback;
+    const supabase = getSupabase();
+    const { data, error } = await supabase.from("site_services").select("payload").eq("id", STORAGE_KEY).maybeSingle();
+    if (error) {
+      if (/relation .*site_services.* does not exist|schema cache/i.test(error.message)) {
+        return null;
+      }
+      throw new Error(error.message);
+    }
+    const payload = data?.payload;
+    if (Array.isArray(payload)) return payload;
+    if (payload && typeof payload === "object" && Array.isArray(payload.items)) {
+      return payload.items;
+    }
+    return null;
   } catch {
-    return fallback;
+    return null;
   }
+}
+async function getServiceById(id) {
+  const catalog = await readCatalog();
+  if (!catalog) return null;
+  return catalog.find((item) => item.id === id) || null;
+}
+var servicesPublicRoutes = new Hono2();
+servicesPublicRoutes.get("/", async (c) => {
+  const catalog = await readCatalog();
+  return c.json({ ok: true, services: catalog || [], source: catalog ? "db" : "empty" });
+});
+var servicesAdminRoutes = new Hono2();
+servicesAdminRoutes.use("/*", requireAdmin);
+servicesAdminRoutes.get(
+  "/",
+  requirePermission("services.prices", "services.units", "services.list"),
+  async (c) => {
+    const catalog = await readCatalog();
+    return c.json({ ok: true, services: catalog || [] });
+  }
+);
+servicesAdminRoutes.put(
+  "/",
+  requirePermission("services.prices", "services.units", "services.list"),
+  async (c) => {
+    try {
+      const body = await c.req.json();
+      const services = Array.isArray(body.services) ? body.services : null;
+      if (!services) return c.json({ ok: false, error: "\u041E\u0436\u0438\u0434\u0430\u0435\u0442\u0441\u044F \u043C\u0430\u0441\u0441\u0438\u0432 services" }, 400);
+      const supabase = getSupabase();
+      const { error } = await supabase.from("site_services").upsert(
+        {
+          id: STORAGE_KEY,
+          payload: { items: services },
+          updated_at: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        { onConflict: "id" }
+      );
+      if (error) {
+        if (/relation .*site_services.* does not exist|schema cache/i.test(error.message)) {
+          return c.json(
+            {
+              ok: false,
+              error: "\u0422\u0430\u0431\u043B\u0438\u0446\u0430 site_services \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u043D\u0430. \u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 supabase/migrations/005_site_services_partners.sql"
+            },
+            503
+          );
+        }
+        throw new Error(error.message);
+      }
+      return c.json({ ok: true, count: services.length });
+    } catch (error) {
+      return c.json(
+        { ok: false, error: error instanceof Error ? error.message : "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u0443\u0441\u043B\u0443\u0433\u0438" },
+        500
+      );
+    }
+  }
+);
+
+// server/src/services/orderNotify.ts
+async function notifyOrder(orderId) {
+  let order = await getOrderById(orderId);
+  if (!order) throw new Error("\u0417\u0430\u044F\u0432\u043A\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430");
+  const telegram = await sendTelegramOrderNotification(order);
+  order = await updateOrderTelegramResult(order.id, {
+    sent: telegram.ok,
+    error: telegram.error
+  });
+  if (!telegram.ok) console.warn("[orders.telegram]", telegram.error);
+  void syncOrderToSheets(order);
+  return { order, telegram };
+}
+
+// server/src/bot/api.ts
+function createTelegramApi(token, timeoutMs = 15e3) {
+  return {
+    async call(method, params = {}) {
+      const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(`Telegram ${method}: ${data.description ?? `HTTP ${res.status}`}`);
+      }
+      return data.result;
+    }
+  };
+}
+function sendText(api2, chatId, text, keyboard) {
+  return api2.call("sendMessage", {
+    chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+    ...keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}
+  });
+}
+
+// server/src/bot/catalog.ts
+var FALLBACK_SERVICES = [
+  {
+    id: "telegram-post",
+    title: "Telegram-\u043F\u043E\u0441\u0442\u044B",
+    description: "\u0422\u0435\u043A\u0441\u0442\u044B \u0438 \u0432\u0438\u0437\u0443\u0430\u043B\u044C\u043D\u0430\u044F \u043F\u043E\u0434\u0430\u0447\u0430 \u043F\u043E\u0441\u0442\u043E\u0432 \u0432 \u0441\u0442\u0438\u043B\u0435 \u0432\u0430\u0448\u0435\u0433\u043E \u043A\u0430\u043D\u0430\u043B\u0430.",
+    priceMode: "numeric",
+    price: 2.5,
+    unitId: "per_piece",
+    unit: "piece",
+    unitLabel: "\u0437\u0430 \u0448\u0442\u0443\u043A\u0443",
+    minimum: 1,
+    maximum: 1e3,
+    step: 1
+  },
+  {
+    id: "telegram-management",
+    title: "\u0412\u0435\u0434\u0435\u043D\u0438\u0435 Telegram-\u043A\u0430\u043D\u0430\u043B\u043E\u0432",
+    description: "\u041A\u043E\u043D\u0442\u0435\u043D\u0442-\u043F\u043B\u0430\u043D, \u043F\u0443\u0431\u043B\u0438\u043A\u0430\u0446\u0438\u0438, \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0430\u043D\u0438\u0435 \u0441\u0442\u0438\u043B\u044F \u0438 \u0442\u0435\u043C\u0430\u0442\u0438\u043A\u0438 \u043A\u0430\u043D\u0430\u043B\u0430.",
+    priceMode: "numeric",
+    price: 10,
+    unitId: "monthly",
+    unit: "month",
+    unitLabel: "\u0432 \u043C\u0435\u0441\u044F\u0446"
+  },
+  {
+    id: "social-ig-youtube",
+    title: "\u0412\u0435\u0434\u0435\u043D\u0438\u0435 Instagram / YouTube",
+    description: "\u0420\u0435\u0433\u0443\u043B\u044F\u0440\u043D\u043E\u0435 \u0432\u0435\u0434\u0435\u043D\u0438\u0435 Instagram \u0438 YouTube: \u043A\u043E\u043D\u0442\u0435\u043D\u0442-\u043F\u043B\u0430\u043D \u0438 \u043F\u0443\u0431\u043B\u0438\u043A\u0430\u0446\u0438\u0438.",
+    priceMode: "numeric",
+    price: 85,
+    pricePrefix: "\u043E\u0442",
+    unitId: "monthly",
+    unit: "month",
+    unitLabel: "\u0432 \u043C\u0435\u0441\u044F\u0446"
+  },
+  {
+    id: "video-creative",
+    title: "\u0412\u0438\u0434\u0435\u043E-\u043A\u0440\u0435\u0430\u0442\u0438\u0432\u044B",
+    description: "\u0420\u0435\u043A\u043B\u0430\u043C\u043D\u044B\u0435 \u0432\u0438\u0434\u0435\u043E-\u043A\u0440\u0435\u0430\u0442\u0438\u0432\u044B \u043F\u043E\u0434 \u0432\u0430\u0448\u0438 \u043E\u0444\u0444\u0435\u0440\u044B \u0438 \u043F\u043B\u043E\u0449\u0430\u0434\u043A\u0438.",
+    priceMode: "numeric",
+    price: 10,
+    unitId: "per_piece",
+    unit: "piece",
+    unitLabel: "\u0437\u0430 10 \u0448\u0442\u0443\u043A",
+    minimum: 10,
+    maximum: 1e3,
+    step: 5
+  },
+  {
+    id: "ai-video",
+    title: "AI-\u0432\u0438\u0434\u0435\u043E\u043A\u0440\u0435\u0430\u0442\u0438\u0432\u044B",
+    description: "\u0412\u0438\u0434\u0435\u043E\u043A\u0440\u0435\u0430\u0442\u0438\u0432\u044B, \u0441\u043E\u0437\u0434\u0430\u043D\u043D\u044B\u0435 \u0441 \u043F\u043E\u043C\u043E\u0449\u044C\u044E AI-\u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u043E\u0432.",
+    priceMode: "numeric",
+    price: 15,
+    unitId: "per_piece",
+    unit: "piece",
+    unitLabel: "\u0437\u0430 10 \u0448\u0442\u0443\u043A",
+    minimum: 10,
+    maximum: 1e3,
+    step: 5
+  },
+  {
+    id: "youtube-video",
+    title: "YouTube-\u0432\u0438\u0434\u0435\u043E 3\u201310 \u043C\u0438\u043D\u0443\u0442",
+    description: "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0439, \u043C\u043E\u043D\u0442\u0430\u0436 \u0438 \u043E\u0444\u043E\u0440\u043C\u043B\u0435\u043D\u0438\u0435 \u0440\u043E\u043B\u0438\u043A\u043E\u0432 \u0434\u043B\u044F YouTube.",
+    priceMode: "numeric",
+    price: 80,
+    pricePrefix: "\u043E\u0442",
+    unitId: "per_piece",
+    unit: "piece",
+    unitLabel: "\u0437\u0430 \u0432\u0438\u0434\u0435\u043E",
+    minimum: 1,
+    maximum: 25,
+    step: 1
+  },
+  {
+    id: "custom",
+    title: "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u044B\u0435 \u0437\u0430\u0434\u0430\u0447\u0438",
+    description: "\u041B\u044E\u0431\u0430\u044F \u043A\u043E\u043D\u0442\u0435\u043D\u0442-\u0437\u0430\u0434\u0430\u0447\u0430, \u043A\u043E\u0442\u043E\u0440\u043E\u0439 \u043D\u0435\u0442 \u0432 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0435.",
+    priceMode: "text",
+    priceText: "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u043E",
+    unitId: "custom",
+    unit: "project",
+    unitLabel: "\u0438\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u043E"
+  }
+];
+function num(value) {
+  const n = typeof value === "string" && value.trim() ? Number(value) : value;
+  return typeof n === "number" && Number.isFinite(n) ? n : void 0;
+}
+function str(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+function normalizeCatalog(raw2) {
+  if (!raw2?.length) return FALLBACK_SERVICES;
+  const services = [];
+  for (const item of raw2) {
+    const id = str(item.id);
+    const title = str(item.title);
+    if (!id || !title || item.enabled === false) continue;
+    const unit = item.unit === "piece" || item.unit === "month" ? item.unit : "project";
+    services.push({
+      id,
+      title,
+      description: str(item.description),
+      priceMode: item.priceMode === "text" ? "text" : "numeric",
+      price: num(item.price),
+      pricePrefix: str(item.pricePrefix) || void 0,
+      priceText: str(item.priceText) || void 0,
+      unitId: str(item.unitId) || "custom",
+      unit,
+      unitLabel: str(item.unitLabel),
+      minimum: num(item.minimum),
+      maximum: num(item.maximum),
+      step: num(item.step)
+    });
+  }
+  return services.length ? services : FALLBACK_SERVICES;
+}
+function formatUsd(value) {
+  return `$${value.toLocaleString("en-US", {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+function hasNumericPrice(service) {
+  return service.priceMode === "numeric" && typeof service.price === "number" && service.unitId !== "custom";
+}
+function packSize(service) {
+  if (service.unitId === "per_5") return 5;
+  if (service.unitId === "per_10") return 10;
+  const match2 = service.unitLabel.match(/за\s+(\d+)\s*(шт|штук)/i);
+  return match2 ? Math.max(1, Number(match2[1])) : 1;
+}
+function isPerPiece(service) {
+  return hasNumericPrice(service) && service.unit === "piece";
+}
+function quantityLimits(service) {
+  const min = Math.max(1, Math.floor(service.minimum ?? 1));
+  const max = Math.max(min, Math.floor(service.maximum ?? 1e3));
+  const step = Math.max(1, Math.floor(service.step ?? 1));
+  return { min, max, step };
+}
+function validateQuantity(service, quantity) {
+  const { min, max, step } = quantityLimits(service);
+  if (!Number.isInteger(quantity)) return "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0446\u0435\u043B\u043E\u0435 \u0447\u0438\u0441\u043B\u043E.";
+  if (quantity < min) return `\u041C\u0438\u043D\u0438\u043C\u0430\u043B\u044C\u043D\u044B\u0439 \u0437\u0430\u043A\u0430\u0437 \u2014 ${min} \u0448\u0442.`;
+  if (quantity > max) return `\u041C\u0430\u043A\u0441\u0438\u043C\u0430\u043B\u044C\u043D\u044B\u0439 \u0437\u0430\u043A\u0430\u0437 \u2014 ${max} \u0448\u0442.`;
+  if ((quantity - min) % step !== 0) return `\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E \u0434\u043E\u043B\u0436\u043D\u043E \u0438\u0434\u0442\u0438 \u0441 \u0448\u0430\u0433\u043E\u043C ${step} (\u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440, ${min}, ${min + step}, ${min + step * 2}).`;
+  return null;
+}
+function quantityPresets(service) {
+  const { min, max, step } = quantityLimits(service);
+  const candidates = [min, min * 2, min * 5, min * 10].map((value) => {
+    const snapped = min + Math.round((value - min) / step) * step;
+    return Math.min(max, snapped);
+  });
+  return [...new Set(candidates)];
+}
+function formatServicePrice(service) {
+  if (!hasNumericPrice(service)) return service.priceText || "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u043E";
+  const amount = formatUsd(service.price);
+  return [service.pricePrefix, amount, service.unitLabel].filter(Boolean).join(" ");
+}
+function quoteOrder(service, quantity) {
+  if (!hasNumericPrice(service)) {
+    return {
+      price: null,
+      priceLabel: service.priceText || "\u0418\u043D\u0434\u0438\u0432\u0438\u0434\u0443\u0430\u043B\u044C\u043D\u043E",
+      quantityLabel: void 0
+    };
+  }
+  if (service.unit === "piece" && quantity) {
+    const total = Math.round(service.price * quantity / packSize(service) * 100) / 100;
+    const prefix = service.pricePrefix ? `${service.pricePrefix} ` : "";
+    return {
+      price: total,
+      priceLabel: `${prefix}${formatUsd(total)} \u0437\u0430 ${quantity} \u0448\u0442.`,
+      quantityLabel: `${quantity} \u0448\u0442.`
+    };
+  }
+  return {
+    price: service.price,
+    priceLabel: formatServicePrice(service),
+    quantityLabel: void 0
+  };
 }
 
 // server/src/lib/rateLimit.ts
@@ -27081,6 +27400,563 @@ function rateLimit(options) {
 function clientIp(headers) {
   const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return forwarded || headers.get("cf-connecting-ip") || headers.get("x-real-ip") || "unknown";
+}
+
+// server/src/lib/links.ts
+function normalizeLink(raw2) {
+  let value = raw2.trim();
+  if (!value) return null;
+  value = value.replace(/^[<"'([]+/, "").replace(/[>"'),.\]]+$/, "");
+  if (!/^https?:\/\//i.test(value)) {
+    if (/^(t\.me|telegram\.me|www\.|docs\.google\.|drive\.google\.|youtu\.be|youtube\.com)/i.test(value)) {
+      value = `https://${value}`;
+    } else if (/^[a-z0-9.-]+\.[a-z]{2,}([/:].*)?$/i.test(value)) {
+      value = `https://${value}`;
+    } else {
+      return null;
+    }
+  }
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+var URL_IN_TEXT = /(?:https?:\/\/|www\.|t\.me\/|telegram\.me\/)[^\s<>"']+/gi;
+function extractLinksFromText(text) {
+  if (!text?.trim()) return [];
+  const matches = text.match(URL_IN_TEXT) || [];
+  const result = [];
+  for (const match2 of matches) {
+    const normalized = normalizeLink(match2);
+    if (normalized && !result.includes(normalized)) result.push(normalized);
+  }
+  return result;
+}
+function collectOrderLinks(input) {
+  const collected = [];
+  const push = (value) => {
+    if (value && !collected.includes(value)) collected.push(value);
+  };
+  if (input.linksJson) {
+    try {
+      const parsed = JSON.parse(input.linksJson);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (typeof item === "string") push(normalizeLink(item));
+        }
+      }
+    } catch {
+      for (const line of input.linksJson.split(/[\n,;\s]+/)) {
+        push(normalizeLink(line));
+      }
+    }
+  }
+  push(normalizeLink(input.linkDraft || ""));
+  for (const link of extractLinksFromText(input.referencesText || "")) push(link);
+  for (const link of extractLinksFromText(input.description || "")) push(link);
+  return collected;
+}
+
+// server/src/bot/handler.ts
+var MIN_DESCRIPTION_LENGTH = 10;
+var MAX_TEXT_LENGTH = 3e3;
+var STATUS_EMOJI = {
+  new: "\u{1F195}",
+  in_progress: "\u2699\uFE0F",
+  done: "\u2705",
+  cancelled: "\u2716\uFE0F"
+};
+var CLIENT_MARKER = /#client(\d+)/;
+var btn = (text, callback_data) => ({ text, callback_data });
+function mainMenu(deps) {
+  const rows = [
+    [btn("\u{1F6D2} \u041E\u0444\u043E\u0440\u043C\u0438\u0442\u044C \u0437\u0430\u043A\u0430\u0437", "order")],
+    [btn("\u{1F4BC} \u0423\u0441\u043B\u0443\u0433\u0438 \u0438 \u0446\u0435\u043D\u044B", "prices"), btn("\u{1F4E6} \u041C\u043E\u0438 \u0437\u0430\u043A\u0430\u0437\u044B", "my")],
+    [btn("\u{1F4AC} \u041D\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u043C\u0435\u043D\u0435\u0434\u0436\u0435\u0440\u0443", "support")]
+  ];
+  if (deps.siteUrl) rows.push([{ text: "\u{1F310} \u0421\u0430\u0439\u0442 iCL", url: deps.siteUrl }]);
+  return rows;
+}
+var backToMenu = [[btn("\u2B05\uFE0F \u0412 \u043C\u0435\u043D\u044E", "menu")]];
+var cancelRow = [btn("\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0438\u0442\u044C", "cancel")];
+function displayName(user) {
+  return [user.first_name, user.last_name].filter(Boolean).join(" ") || "\u043A\u043B\u0438\u0435\u043D\u0442";
+}
+function clientContact(user) {
+  return user.username ? `@${user.username}` : `tg id ${user.id} (${displayName(user)})`;
+}
+function clip(text) {
+  return text.trim().slice(0, MAX_TEXT_LENGTH);
+}
+function formatDate3(iso) {
+  return new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+function createBotHandler(deps) {
+  const { api: api2, sessions } = deps;
+  const reply = (chatId, text, keyboard) => sendText(api2, chatId, text, keyboard);
+  async function findService(id) {
+    if (!id) return void 0;
+    const catalog = await deps.loadCatalog();
+    return catalog.find((service) => service.id === id);
+  }
+  async function showMenu(chatId, user) {
+    await sessions.set(chatId, { step: "idle" });
+    await reply(
+      chatId,
+      [
+        `\u{1F44B} \u041F\u0440\u0438\u0432\u0435\u0442, ${escapeHtml(user.first_name || "\u0434\u0440\u0443\u0433")}!`,
+        "",
+        "\u042F \u0431\u043E\u0442 <b>iGaming Content Lab</b> \u2014 \u043F\u0440\u043E\u0438\u0437\u0432\u043E\u0434\u0438\u043C \u043A\u043E\u043D\u0442\u0435\u043D\u0442 \u0434\u043B\u044F \u0432\u0435\u0431\u043C\u0430\u0441\u0442\u0435\u0440\u043E\u0432 \u0438 \u043C\u0435\u0434\u0438\u0430\u0431\u0430\u0438\u043D\u0433\u043E\u0432\u044B\u0445 \u043A\u043E\u043C\u0430\u043D\u0434: \u0432\u0438\u0434\u0435\u043E-\u043A\u0440\u0435\u0430\u0442\u0438\u0432\u044B, \u043F\u043E\u0441\u0442\u044B, \u0432\u0435\u0434\u0435\u043D\u0438\u0435 Telegram, Instagram \u0438 YouTube.",
+        "",
+        "\u0417\u0434\u0435\u0441\u044C \u043C\u043E\u0436\u043D\u043E \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0446\u0435\u043D\u044B, \u043E\u0444\u043E\u0440\u043C\u0438\u0442\u044C \u0437\u0430\u043A\u0430\u0437 \u0438 \u0441\u043B\u0435\u0434\u0438\u0442\u044C \u0437\u0430 \u0435\u0433\u043E \u0441\u0442\u0430\u0442\u0443\u0441\u043E\u043C."
+      ].join("\n"),
+      mainMenu(deps)
+    );
+  }
+  async function showPrices(chatId) {
+    const catalog = await deps.loadCatalog();
+    const lines = catalog.map(
+      (service) => `\u2022 <b>${escapeHtml(service.title)}</b> \u2014 ${escapeHtml(formatServicePrice(service))}` + (service.description ? `
+  <i>${escapeHtml(service.description)}</i>` : "")
+    );
+    await reply(chatId, ["\u{1F4BC} <b>\u0423\u0441\u043B\u0443\u0433\u0438 \u0438 \u0446\u0435\u043D\u044B</b>", "", ...lines].join("\n"), [
+      [btn("\u{1F6D2} \u041E\u0444\u043E\u0440\u043C\u0438\u0442\u044C \u0437\u0430\u043A\u0430\u0437", "order")],
+      ...backToMenu
+    ]);
+  }
+  async function startOrder(chatId) {
+    await sessions.set(chatId, { step: "idle" });
+    const catalog = await deps.loadCatalog();
+    const rows = catalog.map((service, index) => [
+      btn(`${service.title} \xB7 ${formatServicePrice(service)}`, `svc:${index}`)
+    ]);
+    rows.push(cancelRow);
+    await reply(chatId, "\u{1F6D2} <b>\u041D\u043E\u0432\u044B\u0439 \u0437\u0430\u043A\u0430\u0437</b>\n\n\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0443\u0441\u043B\u0443\u0433\u0443:", rows);
+  }
+  async function selectService(chatId, index) {
+    const catalog = await deps.loadCatalog();
+    const service = catalog[index];
+    if (!service) {
+      await reply(chatId, "\u0423\u0441\u043B\u0443\u0433\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430 \u2014 \u043A\u0430\u0442\u0430\u043B\u043E\u0433 \u043C\u043E\u0433 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C\u0441\u044F. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437.", [
+        [btn("\u{1F6D2} \u0412\u044B\u0431\u0440\u0430\u0442\u044C \u0443\u0441\u043B\u0443\u0433\u0443", "order")]
+      ]);
+      return;
+    }
+    const header = `<b>${escapeHtml(service.title)}</b>
+${escapeHtml(formatServicePrice(service))}`;
+    if (isPerPiece(service)) {
+      const { min, max, step } = quantityLimits(service);
+      await sessions.set(chatId, { step: "await_quantity", serviceId: service.id });
+      const presets = quantityPresets(service).map((qty) => btn(String(qty), `qty:${qty}`));
+      await reply(
+        chatId,
+        `${header}
+
+\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u0448\u0442\u0443\u043A \u043D\u0443\u0436\u043D\u043E? \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0430\u0440\u0438\u0430\u043D\u0442 \u0438\u043B\u0438 \u043E\u0442\u043F\u0440\u0430\u0432\u044C\u0442\u0435 \u0447\u0438\u0441\u043B\u043E (\u043E\u0442 ${min} \u0434\u043E ${max}${step > 1 ? `, \u0448\u0430\u0433 ${step}` : ""}).`,
+        [presets, cancelRow]
+      );
+      return;
+    }
+    await sessions.set(chatId, { step: "await_description", serviceId: service.id });
+    await askDescription(chatId, header);
+  }
+  async function askDescription(chatId, prefix = "") {
+    await reply(
+      chatId,
+      `${prefix ? `${prefix}
+
+` : ""}\u270D\uFE0F \u041E\u043F\u0438\u0448\u0438\u0442\u0435 \u0437\u0430\u0434\u0430\u0447\u0443: \u0433\u0435\u043E, \u043E\u0444\u0444\u0435\u0440, \u043F\u043B\u043E\u0449\u0430\u0434\u043A\u0430, \u0441\u0440\u043E\u043A\u0438, \u043F\u043E\u0436\u0435\u043B\u0430\u043D\u0438\u044F \u043F\u043E \u0441\u0442\u0438\u043B\u044E.`,
+      [cancelRow]
+    );
+  }
+  async function setQuantity(chatId, session, quantity) {
+    const service = await findService(session.serviceId);
+    if (!service) return startOrder(chatId);
+    const error = validateQuantity(service, quantity);
+    if (error) {
+      await reply(chatId, `\u26A0\uFE0F ${error} \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437.`, [cancelRow]);
+      return;
+    }
+    await sessions.set(chatId, { ...session, step: "await_description", quantity });
+    const { priceLabel } = quoteOrder(service, quantity);
+    await askDescription(chatId, `\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E: <b>${quantity} \u0448\u0442.</b>
+\u0421\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u044C: <b>${escapeHtml(priceLabel)}</b>`);
+  }
+  async function showConfirm(chatId, session) {
+    const service = await findService(session.serviceId);
+    if (!service) return startOrder(chatId);
+    const quote = quoteOrder(service, session.quantity);
+    const lines = [
+      "\u{1F4DD} <b>\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0437\u0430\u044F\u0432\u043A\u0443</b>",
+      "",
+      `<b>\u0423\u0441\u043B\u0443\u0433\u0430:</b> ${escapeHtml(service.title)}`,
+      ...quote.quantityLabel ? [`<b>\u041E\u0431\u044A\u0451\u043C:</b> ${escapeHtml(quote.quantityLabel)}`] : [],
+      `<b>\u0421\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u044C:</b> ${escapeHtml(quote.priceLabel)}`,
+      "",
+      `<b>\u0417\u0430\u0434\u0430\u0447\u0430:</b>
+${escapeHtml(session.description || "\u2014")}`,
+      "",
+      `<b>\u0420\u0435\u0444\u0435\u0440\u0435\u043D\u0441\u044B:</b>
+${escapeHtml(session.references || "\u2014")}`
+    ];
+    await reply(chatId, lines.join("\n"), [
+      [btn("\u2705 \u041E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0437\u0430\u044F\u0432\u043A\u0443", "confirm")],
+      [btn("\u{1F504} \u0417\u0430\u043D\u043E\u0432\u043E", "order"), btn("\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0438\u0442\u044C", "cancel")]
+    ]);
+  }
+  async function submitOrder(chatId, user) {
+    const session = await sessions.get(chatId);
+    const service = await findService(session.serviceId);
+    if (session.step !== "confirm" || !service || !session.description) {
+      await reply(chatId, "\u042D\u0442\u0430 \u0437\u0430\u044F\u0432\u043A\u0430 \u0443\u0436\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0430 \u0438\u043B\u0438 \u0443\u0441\u0442\u0430\u0440\u0435\u043B\u0430.", mainMenu(deps));
+      return;
+    }
+    const limited = rateLimit({ key: `bot-order:${user.id}`, limit: 5, windowMs: 60 * 60 * 1e3 });
+    if (!limited.ok) {
+      await reply(chatId, `\u23F3 \u0421\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u043D\u043E\u0433\u043E \u0437\u0430\u044F\u0432\u043E\u043A \u043F\u043E\u0434\u0440\u044F\u0434. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 ${Math.ceil(limited.retryAfterSec / 60)} \u043C\u0438\u043D.`);
+      return;
+    }
+    await sessions.set(chatId, { step: "idle" });
+    const quote = quoteOrder(service, session.quantity);
+    const description = session.description;
+    const referencesText = session.references || "";
+    let order;
+    try {
+      order = await deps.createOrder({
+        clientTelegram: clientContact(user),
+        serviceId: service.id,
+        serviceTitle: service.title,
+        platform: "Telegram-\u0431\u043E\u0442",
+        quantityLabel: quote.quantityLabel,
+        price: quote.price,
+        priceLabel: quote.priceLabel,
+        description,
+        referencesText,
+        links: collectOrderLinks({ description, referencesText }),
+        meta: {
+          source: "telegram_bot",
+          telegram_user_id: String(user.id),
+          telegram_chat_id: String(chatId),
+          telegram_username: user.username || null,
+          telegram_name: displayName(user),
+          quantity: session.quantity ?? null
+        }
+      });
+    } catch (error) {
+      console.error("[bot.createOrder]", error);
+      await sessions.set(chatId, session);
+      await reply(chatId, "\u{1F614} \u041D\u0435 \u043F\u043E\u043B\u0443\u0447\u0438\u043B\u043E\u0441\u044C \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u0437\u0430\u044F\u0432\u043A\u0443. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437 \u0447\u0443\u0442\u044C \u043F\u043E\u0437\u0436\u0435 \u0438\u043B\u0438 \u043D\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u043C\u0435\u043D\u0435\u0434\u0436\u0435\u0440\u0443.", [
+        [btn("\u{1F501} \u041F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u044C", "confirm")],
+        [{ text: "\u{1F4AC} \u041F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u0430", url: deps.supportUrl }]
+      ]);
+      return;
+    }
+    try {
+      await deps.afterOrderCreated(order);
+    } catch (error) {
+      console.error("[bot.afterOrderCreated]", error);
+    }
+    await reply(
+      chatId,
+      [
+        "\u{1F389} <b>\u0417\u0430\u044F\u0432\u043A\u0430 \u043F\u0440\u0438\u043D\u044F\u0442\u0430!</b>",
+        "",
+        `\u041D\u043E\u043C\u0435\u0440: <code>${escapeHtml(order.public_id)}</code>`,
+        "\u041C\u0435\u043D\u0435\u0434\u0436\u0435\u0440 \u0441\u0432\u044F\u0436\u0435\u0442\u0441\u044F \u0441 \u0432\u0430\u043C\u0438 \u0432 Telegram \u0432 \u0431\u043B\u0438\u0436\u0430\u0439\u0448\u0435\u0435 \u0432\u0440\u0435\u043C\u044F. \u041E\u0431 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F\u0445 \u0441\u0442\u0430\u0442\u0443\u0441\u0430 \u044F \u0441\u043E\u043E\u0431\u0449\u0443 \u0437\u0434\u0435\u0441\u044C."
+      ].join("\n"),
+      mainMenu(deps)
+    );
+  }
+  async function showMyOrders(chatId, user) {
+    let orders;
+    try {
+      orders = await deps.listOrders(user);
+    } catch (error) {
+      console.error("[bot.listOrders]", error);
+      await reply(chatId, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0437\u0430\u043A\u0430\u0437\u044B. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u043F\u043E\u0437\u0436\u0435.", backToMenu);
+      return;
+    }
+    if (!orders.length) {
+      await reply(chatId, "\u{1F4E6} \u0423 \u0432\u0430\u0441 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442 \u0437\u0430\u043A\u0430\u0437\u043E\u0432.", [[btn("\u{1F6D2} \u041E\u0444\u043E\u0440\u043C\u0438\u0442\u044C \u0437\u0430\u043A\u0430\u0437", "order")], ...backToMenu]);
+      return;
+    }
+    const lines = orders.slice(0, 10).map(
+      (order) => [
+        `${STATUS_EMOJI[order.status] ?? "\u2022"} <code>${escapeHtml(order.public_id)}</code> \u2014 ${escapeHtml(ORDER_STATUS_LABELS[order.status] ?? order.status)}`,
+        `   ${escapeHtml(order.service_title)}${order.price_label ? ` \xB7 ${escapeHtml(order.price_label)}` : ""} \xB7 ${formatDate3(order.created_at)}`
+      ].join("\n")
+    );
+    await reply(chatId, ["\u{1F4E6} <b>\u0412\u0430\u0448\u0438 \u0437\u0430\u043A\u0430\u0437\u044B</b>", "", ...lines].join("\n"), backToMenu);
+  }
+  async function startSupport(chatId) {
+    if (!deps.adminChatId) {
+      await reply(chatId, "\u041D\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u043D\u0430\u0448\u0435\u043C\u0443 \u043C\u0435\u043D\u0435\u0434\u0436\u0435\u0440\u0443 \u043D\u0430\u043F\u0440\u044F\u043C\u0443\u044E:", [
+        [{ text: "\u{1F4AC} \u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0447\u0430\u0442 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u0438", url: deps.supportUrl }],
+        ...backToMenu
+      ]);
+      return;
+    }
+    await sessions.set(chatId, { step: "await_question" });
+    await reply(chatId, "\u{1F4AC} \u041D\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u0432\u043E\u043F\u0440\u043E\u0441 \u043E\u0434\u043D\u0438\u043C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435\u043C \u2014 \u044F \u043F\u0435\u0440\u0435\u0434\u0430\u043C \u0435\u0433\u043E \u043C\u0435\u043D\u0435\u0434\u0436\u0435\u0440\u0443, \u043E\u0442\u0432\u0435\u0442 \u043F\u0440\u0438\u0434\u0451\u0442 \u0441\u044E\u0434\u0430.", [cancelRow]);
+  }
+  async function forwardQuestion(chatId, user, text) {
+    await sessions.set(chatId, { step: "idle" });
+    try {
+      await sendText(
+        api2,
+        deps.adminChatId,
+        [
+          "\u{1F4AC} <b>\u0412\u043E\u043F\u0440\u043E\u0441 \u0438\u0437 \u0431\u043E\u0442\u0430</b>",
+          `\u041E\u0442: ${escapeHtml(clientContact(user))}`,
+          "",
+          escapeHtml(text),
+          "",
+          `<i>\u041E\u0442\u0432\u0435\u0442\u044C\u0442\u0435 \u0440\u0435\u043F\u043B\u0430\u0435\u043C \u043D\u0430 \u044D\u0442\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u2014 \u043E\u0442\u0432\u0435\u0442 \u0443\u0439\u0434\u0451\u0442 \u043A\u043B\u0438\u0435\u043D\u0442\u0443.</i> #client${chatId}`
+        ].join("\n")
+      );
+      await reply(chatId, "\u2705 \u0412\u043E\u043F\u0440\u043E\u0441 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D \u043C\u0435\u043D\u0435\u0434\u0436\u0435\u0440\u0443. \u041E\u0442\u0432\u0435\u0442 \u043F\u0440\u0438\u0434\u0451\u0442 \u0432 \u044D\u0442\u043E\u0442 \u0447\u0430\u0442.", mainMenu(deps));
+    } catch (error) {
+      console.error("[bot.forwardQuestion]", error);
+      await reply(chatId, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0435\u0440\u0435\u0434\u0430\u0442\u044C \u0432\u043E\u043F\u0440\u043E\u0441. \u041D\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u043C\u0435\u043D\u0435\u0434\u0436\u0435\u0440\u0443 \u043D\u0430\u043F\u0440\u044F\u043C\u0443\u044E:", [
+        [{ text: "\u{1F4AC} \u041F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u0430", url: deps.supportUrl }]
+      ]);
+    }
+  }
+  async function handleAdminReply(message) {
+    const original = message.reply_to_message;
+    const source = original?.text || original?.caption || "";
+    const match2 = source.match(CLIENT_MARKER);
+    const text = message.text?.trim();
+    if (!match2 || !text) return;
+    try {
+      await sendText(api2, Number(match2[1]), `\u{1F4AC} <b>\u041E\u0442\u0432\u0435\u0442 \u043C\u0435\u043D\u0435\u0434\u0436\u0435\u0440\u0430 iCL</b>
+
+${escapeHtml(text)}`, [
+        [btn("\u21A9\uFE0F \u041E\u0442\u0432\u0435\u0442\u0438\u0442\u044C", "support")]
+      ]);
+      await sendText(api2, message.chat.id, "\u2705 \u041E\u0442\u0432\u0435\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D \u043A\u043B\u0438\u0435\u043D\u0442\u0443.");
+    } catch (error) {
+      await sendText(
+        api2,
+        message.chat.id,
+        `\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u043E\u0442\u0432\u0435\u0442: ${escapeHtml(error instanceof Error ? error.message : String(error))}`
+      );
+    }
+  }
+  async function handleText(message, user) {
+    const chatId = message.chat.id;
+    const text = (message.text ?? message.caption ?? "").trim();
+    const command = text.startsWith("/") ? text.split(/[\s@]/)[0].toLowerCase() : "";
+    switch (command) {
+      case "/start":
+        if (text.split(/\s+/)[1] === "order") return startOrder(chatId);
+        return showMenu(chatId, user);
+      case "/menu":
+      case "/help":
+        return showMenu(chatId, user);
+      case "/order":
+        return startOrder(chatId);
+      case "/prices":
+        return showPrices(chatId);
+      case "/my":
+        return showMyOrders(chatId, user);
+      case "/support":
+        return startSupport(chatId);
+      case "/cancel":
+        await sessions.set(chatId, { step: "idle" });
+        return reply(chatId, "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043E\u0442\u043C\u0435\u043D\u0435\u043D\u043E.", mainMenu(deps));
+    }
+    const session = await sessions.get(chatId);
+    if (!text) {
+      if (session.step === "idle") return showMenu(chatId, user);
+      return reply(
+        chatId,
+        "\u{1F4CE} \u0424\u0430\u0439\u043B\u044B \u0447\u0435\u0440\u0435\u0437 \u0431\u043E\u0442 \u043F\u043E\u043A\u0430 \u043D\u0435 \u043F\u0440\u0438\u043D\u0438\u043C\u0430\u044E\u0442\u0441\u044F \u2014 \u043F\u0440\u0438\u0448\u043B\u0438\u0442\u0435 \u0441\u0441\u044B\u043B\u043A\u0443 (Google Drive, Dropbox, t.me) \u0442\u0435\u043A\u0441\u0442\u043E\u043C, \u0430 \u0438\u0441\u0445\u043E\u0434\u043D\u0438\u043A\u0438 \u043C\u0435\u043D\u0435\u0434\u0436\u0435\u0440 \u0437\u0430\u043F\u0440\u043E\u0441\u0438\u0442 \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u043E."
+      );
+    }
+    switch (session.step) {
+      case "await_quantity": {
+        const quantity = Number(text.replace(/\s/g, ""));
+        return setQuantity(chatId, session, quantity);
+      }
+      case "await_description":
+        if (text.length < MIN_DESCRIPTION_LENGTH) {
+          return reply(chatId, "\u041E\u043F\u0438\u0448\u0438\u0442\u0435 \u0437\u0430\u0434\u0430\u0447\u0443 \u0447\u0443\u0442\u044C \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u0435\u0435 \u2014 \u0445\u043E\u0442\u044F \u0431\u044B \u043F\u0430\u0440\u0443 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0439.", [cancelRow]);
+        }
+        await sessions.set(chatId, { ...session, step: "await_references", description: clip(text) });
+        return reply(
+          chatId,
+          "\u{1F517} \u0415\u0441\u0442\u044C \u0440\u0435\u0444\u0435\u0440\u0435\u043D\u0441\u044B \u0438\u043B\u0438 \u0441\u0441\u044B\u043B\u043A\u0438 (\u043A\u0430\u043D\u0430\u043B, \u043F\u0440\u0438\u043C\u0435\u0440\u044B \u043A\u0440\u0435\u0430\u0442\u0438\u0432\u043E\u0432, \u0422\u0417)? \u041F\u0440\u0438\u0448\u043B\u0438\u0442\u0435 \u0438\u0445 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435\u043C \u0438\u043B\u0438 \u043D\u0430\u0436\u043C\u0438\u0442\u0435 \xAB\u041F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C\xBB.",
+          [[btn("\u23ED \u041F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C", "skip")], cancelRow]
+        );
+      case "await_references": {
+        const next = { ...session, step: "confirm", references: clip(text) };
+        await sessions.set(chatId, next);
+        return showConfirm(chatId, next);
+      }
+      case "confirm":
+        return showConfirm(chatId, session);
+      case "await_question":
+        return forwardQuestion(chatId, user, clip(text));
+      default:
+        return reply(chatId, "\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u0432 \u043C\u0435\u043D\u044E \u{1F447}", mainMenu(deps));
+    }
+  }
+  async function handleCallback(query) {
+    await api2.call("answerCallbackQuery", { callback_query_id: query.id }).catch(() => void 0);
+    const chatId = query.message?.chat.id;
+    if (!chatId || query.message?.chat.type !== "private") return;
+    const data = query.data || "";
+    const user = query.from;
+    if (data === "menu") return showMenu(chatId, user);
+    if (data === "order") return startOrder(chatId);
+    if (data === "prices") return showPrices(chatId);
+    if (data === "my") return showMyOrders(chatId, user);
+    if (data === "support") return startSupport(chatId);
+    if (data === "confirm") return submitOrder(chatId, user);
+    if (data === "cancel") {
+      await sessions.set(chatId, { step: "idle" });
+      return reply(chatId, "\u0417\u0430\u043A\u0430\u0437 \u043E\u0442\u043C\u0435\u043D\u0451\u043D. \u0412\u043E\u0437\u0432\u0440\u0430\u0449\u0430\u0439\u0442\u0435\u0441\u044C, \u043A\u043E\u0433\u0434\u0430 \u0431\u0443\u0434\u0435\u0442\u0435 \u0433\u043E\u0442\u043E\u0432\u044B \u{1F64C}", mainMenu(deps));
+    }
+    if (data.startsWith("svc:")) return selectService(chatId, Number(data.slice(4)));
+    const session = await sessions.get(chatId);
+    if (data.startsWith("qty:") && session.step === "await_quantity") {
+      return setQuantity(chatId, session, Number(data.slice(4)));
+    }
+    if (data === "skip" && session.step === "await_references") {
+      const next = { ...session, step: "confirm", references: "" };
+      await sessions.set(chatId, next);
+      return showConfirm(chatId, next);
+    }
+  }
+  return async function handleUpdate(update) {
+    try {
+      if (update.callback_query) return await handleCallback(update.callback_query);
+      const message = update.message;
+      if (!message?.from || message.from.is_bot) return;
+      if (message.chat.type === "private") return await handleText(message, message.from);
+      if (deps.adminChatId && String(message.chat.id) === deps.adminChatId && message.reply_to_message) {
+        return await handleAdminReply(message);
+      }
+    } catch (error) {
+      console.error("[bot.update]", update.update_id, error);
+    }
+  };
+}
+function formatStatusChangeMessage(order, note) {
+  const status = ORDER_STATUS_LABELS[order.status] ?? order.status;
+  return [
+    `${STATUS_EMOJI[order.status] ?? "\u{1F514}"} <b>\u0421\u0442\u0430\u0442\u0443\u0441 \u0437\u0430\u043A\u0430\u0437\u0430 \u043E\u0431\u043D\u043E\u0432\u043B\u0451\u043D</b>`,
+    "",
+    `<code>${escapeHtml(order.public_id)}</code> \xB7 ${escapeHtml(order.service_title)}`,
+    `\u041D\u043E\u0432\u044B\u0439 \u0441\u0442\u0430\u0442\u0443\u0441: <b>${escapeHtml(status)}</b>`,
+    note?.trim() ? `
+${escapeHtml(note.trim())}` : ""
+  ].filter(Boolean).join("\n");
+}
+
+// server/src/bot/sessions.ts
+var IDLE = { step: "idle" };
+function createMemorySessionStore() {
+  const sessions = /* @__PURE__ */ new Map();
+  return {
+    async get(chatId) {
+      return { ...sessions.get(chatId) ?? IDLE };
+    },
+    async set(chatId, session) {
+      sessions.set(chatId, { ...session });
+    }
+  };
+}
+var MISSING_TABLE = /relation .*telegram_bot_sessions.* does not exist|schema cache|PGRST205/i;
+function createSupabaseSessionStore(getClient) {
+  const memory = createMemorySessionStore();
+  let useMemory = false;
+  const fallback = (error) => {
+    if (!MISSING_TABLE.test(error.message)) throw new Error(error.message);
+    if (!useMemory) {
+      console.warn(
+        "[bot] table telegram_bot_sessions not found \u2014 apply supabase/migrations/008_telegram_bot.sql. Using in-memory sessions."
+      );
+    }
+    useMemory = true;
+  };
+  return {
+    async get(chatId) {
+      if (useMemory) return memory.get(chatId);
+      const { data, error } = await getClient().from("telegram_bot_sessions").select("state").eq("chat_id", chatId).maybeSingle();
+      if (error) {
+        fallback(error);
+        return memory.get(chatId);
+      }
+      const state = data?.state;
+      return state?.step ? state : { ...IDLE };
+    },
+    async set(chatId, session) {
+      if (useMemory) return memory.set(chatId, session);
+      const { error } = await getClient().from("telegram_bot_sessions").upsert(
+        { chat_id: chatId, state: session, updated_at: (/* @__PURE__ */ new Date()).toISOString() },
+        { onConflict: "chat_id" }
+      );
+      if (error) {
+        fallback(error);
+        await memory.set(chatId, session);
+      }
+    }
+  };
+}
+
+// server/src/bot/index.ts
+var api = null;
+var handler = null;
+function getBotApi() {
+  if (!serverEnv.telegramBotToken) return null;
+  api ??= createTelegramApi(serverEnv.telegramBotToken);
+  return api;
+}
+function supabaseConfigured() {
+  return Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey);
+}
+function getBotHandler() {
+  const botApi = getBotApi();
+  if (!botApi) return null;
+  handler ??= createBotHandler({
+    api: botApi,
+    sessions: supabaseConfigured() ? createSupabaseSessionStore(getSupabase) : createMemorySessionStore(),
+    loadCatalog: async () => normalizeCatalog(supabaseConfigured() ? await readCatalog() : null),
+    createOrder: (input) => createOrder(input),
+    afterOrderCreated: async (order) => {
+      await notifyOrder(order.id);
+    },
+    listOrders: (user) => listOrdersForTelegramUser({ telegramUserId: user.id, username: user.username }),
+    adminChatId: serverEnv.telegramAdminId,
+    supportUrl: serverEnv.telegramSupportUrl,
+    siteUrl: serverEnv.publicSiteUrl
+  });
+  return handler;
+}
+async function notifyClientStatusChange(order, note) {
+  const chatId = order.meta?.telegram_chat_id;
+  const botApi = getBotApi();
+  if (!botApi || typeof chatId !== "string" && typeof chatId !== "number") return;
+  try {
+    await sendText(botApi, chatId, formatStatusChangeMessage(order, note));
+  } catch (error) {
+    console.warn("[bot.statusNotify]", error instanceof Error ? error.message : error);
+  }
+}
+
+// server/src/lib/jsonBody.ts
+async function readJsonBody(request, fallback) {
+  try {
+    const body = await request.json();
+    return body && typeof body === "object" ? body : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 // server/src/routes/admin.ts
@@ -27236,6 +28112,7 @@ adminRoutes.patch("/orders/:id/status", requirePermission("orders.status"), asyn
     const order = await updateOrderStatus(c.req.param("id"), status, body.note || "");
     const history = await getOrderHistory(order.id);
     void syncOrderToSheets(order);
+    await notifyClientStatusChange(order, body.note);
     return c.json({ ok: true, order, history });
   } catch (error) {
     return c.json(
@@ -28075,146 +28952,6 @@ filesPublicRoutes.get("/:fileId/:filename", async (c) => {
   });
 });
 
-// server/src/lib/links.ts
-function normalizeLink(raw2) {
-  let value = raw2.trim();
-  if (!value) return null;
-  value = value.replace(/^[<"'([]+/, "").replace(/[>"'),.\]]+$/, "");
-  if (!/^https?:\/\//i.test(value)) {
-    if (/^(t\.me|telegram\.me|www\.|docs\.google\.|drive\.google\.|youtu\.be|youtube\.com)/i.test(value)) {
-      value = `https://${value}`;
-    } else if (/^[a-z0-9.-]+\.[a-z]{2,}([/:].*)?$/i.test(value)) {
-      value = `https://${value}`;
-    } else {
-      return null;
-    }
-  }
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-var URL_IN_TEXT = /(?:https?:\/\/|www\.|t\.me\/|telegram\.me\/)[^\s<>"']+/gi;
-function extractLinksFromText(text) {
-  if (!text?.trim()) return [];
-  const matches = text.match(URL_IN_TEXT) || [];
-  const result = [];
-  for (const match2 of matches) {
-    const normalized = normalizeLink(match2);
-    if (normalized && !result.includes(normalized)) result.push(normalized);
-  }
-  return result;
-}
-function collectOrderLinks(input) {
-  const collected = [];
-  const push = (value) => {
-    if (value && !collected.includes(value)) collected.push(value);
-  };
-  if (input.linksJson) {
-    try {
-      const parsed = JSON.parse(input.linksJson);
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          if (typeof item === "string") push(normalizeLink(item));
-        }
-      }
-    } catch {
-      for (const line of input.linksJson.split(/[\n,;\s]+/)) {
-        push(normalizeLink(line));
-      }
-    }
-  }
-  push(normalizeLink(input.linkDraft || ""));
-  for (const link of extractLinksFromText(input.referencesText || "")) push(link);
-  for (const link of extractLinksFromText(input.description || "")) push(link);
-  return collected;
-}
-
-// server/src/routes/services.ts
-init_supabase();
-var STORAGE_KEY = "catalog";
-async function readCatalog() {
-  try {
-    const supabase = getSupabase();
-    const { data, error } = await supabase.from("site_services").select("payload").eq("id", STORAGE_KEY).maybeSingle();
-    if (error) {
-      if (/relation .*site_services.* does not exist|schema cache/i.test(error.message)) {
-        return null;
-      }
-      throw new Error(error.message);
-    }
-    const payload = data?.payload;
-    if (Array.isArray(payload)) return payload;
-    if (payload && typeof payload === "object" && Array.isArray(payload.items)) {
-      return payload.items;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-async function getServiceById(id) {
-  const catalog = await readCatalog();
-  if (!catalog) return null;
-  return catalog.find((item) => item.id === id) || null;
-}
-var servicesPublicRoutes = new Hono2();
-servicesPublicRoutes.get("/", async (c) => {
-  const catalog = await readCatalog();
-  return c.json({ ok: true, services: catalog || [], source: catalog ? "db" : "empty" });
-});
-var servicesAdminRoutes = new Hono2();
-servicesAdminRoutes.use("/*", requireAdmin);
-servicesAdminRoutes.get(
-  "/",
-  requirePermission("services.prices", "services.units", "services.list"),
-  async (c) => {
-    const catalog = await readCatalog();
-    return c.json({ ok: true, services: catalog || [] });
-  }
-);
-servicesAdminRoutes.put(
-  "/",
-  requirePermission("services.prices", "services.units", "services.list"),
-  async (c) => {
-    try {
-      const body = await c.req.json();
-      const services = Array.isArray(body.services) ? body.services : null;
-      if (!services) return c.json({ ok: false, error: "\u041E\u0436\u0438\u0434\u0430\u0435\u0442\u0441\u044F \u043C\u0430\u0441\u0441\u0438\u0432 services" }, 400);
-      const supabase = getSupabase();
-      const { error } = await supabase.from("site_services").upsert(
-        {
-          id: STORAGE_KEY,
-          payload: { items: services },
-          updated_at: (/* @__PURE__ */ new Date()).toISOString()
-        },
-        { onConflict: "id" }
-      );
-      if (error) {
-        if (/relation .*site_services.* does not exist|schema cache/i.test(error.message)) {
-          return c.json(
-            {
-              ok: false,
-              error: "\u0422\u0430\u0431\u043B\u0438\u0446\u0430 site_services \u043D\u0435 \u0441\u043E\u0437\u0434\u0430\u043D\u0430. \u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 supabase/migrations/005_site_services_partners.sql"
-            },
-            503
-          );
-        }
-        throw new Error(error.message);
-      }
-      return c.json({ ok: true, count: services.length });
-    } catch (error) {
-      return c.json(
-        { ok: false, error: error instanceof Error ? error.message : "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u0443\u0441\u043B\u0443\u0433\u0438" },
-        500
-      );
-    }
-  }
-);
-
 // server/src/routes/orders.ts
 init_storage();
 function parseMeta(raw2) {
@@ -28261,18 +28998,6 @@ async function resolvePricing(input) {
     priceLabel = input.priceLabel || void 0;
   }
   return { serviceTitle, price, priceLabel };
-}
-async function notifyOrder(orderId) {
-  let order = await getOrderById(orderId);
-  if (!order) throw new Error("\u0417\u0430\u044F\u0432\u043A\u0430 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430");
-  const telegram = await sendTelegramOrderNotification(order);
-  order = await updateOrderTelegramResult(order.id, {
-    sent: telegram.ok,
-    error: telegram.error
-  });
-  if (!telegram.ok) console.warn("[orders.telegram]", telegram.error);
-  void syncOrderToSheets(order);
-  return { order, telegram };
 }
 var ordersPublicRoutes = new Hono2();
 ordersPublicRoutes.use("*", optionalUserAuth);
@@ -28673,6 +29398,35 @@ partnersPublicRoutes.post("/", async (c) => {
   }
 });
 
+// server/src/routes/telegramBot.ts
+import { timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+init_env();
+function secretMatches(received, expected) {
+  if (!received) return false;
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual2(a, b);
+}
+var telegramBotRoutes = new Hono2();
+telegramBotRoutes.post("/webhook", async (c) => {
+  const secret = serverEnv.telegramWebhookSecret;
+  const handler2 = getBotHandler();
+  if (!secret || !handler2) {
+    return c.json({ ok: false, error: "\u0411\u043E\u0442 \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D (TELEGRAM_BOT_TOKEN / TELEGRAM_WEBHOOK_SECRET)" }, 503);
+  }
+  if (!secretMatches(c.req.header("x-telegram-bot-api-secret-token"), secret)) {
+    return c.json({ ok: false, error: "Forbidden" }, 403);
+  }
+  let update;
+  try {
+    update = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: "Invalid JSON" }, 400);
+  }
+  await handler2(update);
+  return c.json({ ok: true });
+});
+
 // server/src/routes/visits.ts
 var recentHits = /* @__PURE__ */ new Map();
 var RATE_WINDOW_MS = 8e3;
@@ -28758,6 +29512,7 @@ app.get(
     runtime: process.env.VERCEL ? "vercel" : "node",
     supabaseConfigured: Boolean(serverEnv.supabaseUrl && serverEnv.supabaseServiceRoleKey),
     telegramConfigured: Boolean(serverEnv.telegramBotToken && serverEnv.telegramAdminId),
+    botWebhookConfigured: Boolean(serverEnv.telegramBotToken && serverEnv.telegramWebhookSecret),
     sheetsConfigured: Boolean(
       serverEnv.googleSheetsWebhookUrl && serverEnv.googleSheetsWebhookSecret
     ),
@@ -28775,6 +29530,7 @@ app.route("/api/admin/portfolio", portfolioAdminRoutes);
 app.route("/api/admin/users", adminUsersRoutes);
 app.route("/api/admin/services", servicesAdminRoutes);
 app.route("/api/files", filesPublicRoutes);
+app.route("/api/telegram", telegramBotRoutes);
 app.notFound((c) => {
   if (c.req.path.startsWith("/api")) {
     return c.json({ ok: false, error: `API-\u043C\u0430\u0440\u0448\u0440\u0443\u0442 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D: ${c.req.method} ${c.req.path}` }, 404);

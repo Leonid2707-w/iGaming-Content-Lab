@@ -201,6 +201,26 @@ export async function listOrders(params: {
   return (data ?? []).map((row) => mapOrder(row as Record<string, unknown>))
 }
 
+export async function listOrdersForTelegramUser(params: {
+  telegramUserId: number
+  username?: string
+  limit?: number
+}) {
+  const filters = [`meta->>telegram_user_id.eq.${Math.trunc(params.telegramUserId)}`]
+  // Telegram usernames are [A-Za-z0-9_]; anything else would break the PostgREST filter syntax.
+  if (params.username && /^[A-Za-z0-9_]{3,32}$/.test(params.username)) {
+    filters.push(`client_telegram.ilike.@${params.username}`, `client_telegram.ilike.${params.username}`)
+  }
+  const { data, error } = await getSupabase()
+    .from('orders')
+    .select('*')
+    .or(filters.join(','))
+    .order('created_at', { ascending: false })
+    .limit(params.limit ?? 10)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((row) => mapOrder(row as Record<string, unknown>))
+}
+
 export async function getOrderById(id: string) {
   const supabase = getSupabase()
   const { data, error } = await supabase.from('orders').select('*').eq('id', id).maybeSingle()

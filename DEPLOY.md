@@ -13,6 +13,7 @@
 - `PUBLIC_SITE_URL=https://igamingcontentlab.pro`
 - `ALLOWED_ORIGINS=https://www.igamingcontentlab.pro,https://igamingcontentlab.pro`
 - `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ADMIN_ID`
+- `TELEGRAM_WEBHOOK_SECRET` — for the client bot webhook (see `TELEGRAM_BOT.md`)
 - Optional: `GOOGLE_SHEETS_WEBHOOK_URL` / `GOOGLE_SHEETS_WEBHOOK_SECRET`
 
 Do **not** set `VITE_API_URL` for same-origin `/api`.
@@ -26,6 +27,9 @@ Run in order from `supabase/migrations/`:
 5. `005_site_services_partners.sql`
 6. `006_order_rpcs.sql` — transactional create/status + history index
 7. `007_admin_users.sql` — multi-admin RBAC (owner `leonid` seeded from `ADMIN_PASSWORD`)
+8. `008_telegram_bot.sql` — Telegram bot dialog state
+
+After deploy: `npm run bot:setup` registers the bot webhook (`/api/telegram/webhook`).
 
 Ensure Storage bucket `order-files` exists (private).
 

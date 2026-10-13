@@ -41,6 +41,9 @@ export const serverEnv = {
   supabaseServiceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
   telegramBotToken: required('TELEGRAM_BOT_TOKEN'),
   telegramAdminId: required('TELEGRAM_ADMIN_ID'),
+  /** Secret for `X-Telegram-Bot-Api-Secret-Token` on the bot webhook. */
+  telegramWebhookSecret: required('TELEGRAM_WEBHOOK_SECRET'),
+  telegramSupportUrl: required('TELEGRAM_SUPPORT_URL') || 'https://t.me/ICLsupport',
   /** Optional custom HTML template with {placeholders}. Use \n for newlines in .env */
   telegramOrderTemplate: required('TELEGRAM_ORDER_TEMPLATE')?.replaceAll('\\n', '\n'),
   googleSheetsWebhookUrl: required('GOOGLE_SHEETS_WEBHOOK_URL'),

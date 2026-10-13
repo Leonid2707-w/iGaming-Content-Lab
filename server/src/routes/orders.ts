@@ -1,10 +1,5 @@
 import { Hono } from 'hono'
-import {
-  createOrder,
-  getOrderById,
-  updateOrderFiles,
-  updateOrderTelegramResult,
-} from '../db/orders.js'
+import { createOrder, getOrderById, updateOrderFiles } from '../db/orders.js'
 import { collectOrderLinks } from '../lib/links.js'
 import { clientIp, rateLimit } from '../lib/rateLimit.js'
 import { optionalUserAuth } from '../middleware/userAuth.js'
@@ -16,8 +11,7 @@ import {
   createOrderUploadSlots,
   uploadOrderFiles,
 } from '../services/storage.js'
-import { syncOrderToSheets } from '../services/googleSheets.js'
-import { sendTelegramOrderNotification } from '../services/telegram.js'
+import { notifyOrder } from '../services/orderNotify.js'
 import { readJsonBody } from '../lib/jsonBody.js'
 
 function parseMeta(raw?: string | Record<string, unknown> | null) {
@@ -91,19 +85,6 @@ async function resolvePricing(input: OrderInput) {
   }
 
   return { serviceTitle, price, priceLabel }
-}
-
-async function notifyOrder(orderId: string) {
-  let order = await getOrderById(orderId)
-  if (!order) throw new Error('Заявка не найдена')
-  const telegram = await sendTelegramOrderNotification(order)
-  order = await updateOrderTelegramResult(order.id, {
-    sent: telegram.ok,
-    error: telegram.error,
-  })
-  if (!telegram.ok) console.warn('[orders.telegram]', telegram.error)
-  void syncOrderToSheets(order)
-  return { order, telegram }
 }
 
 export const ordersPublicRoutes = new Hono()

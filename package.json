@@ -12,6 +12,8 @@
     "dev:server": "tsx watch server/src/index.ts",
     "build": "tsc -b && vite build && node scripts/bundle-api.mjs",
     "bundle:api": "node scripts/bundle-api.mjs",
+    "bot:dev": "tsx server/src/bot/polling.ts",
+    "bot:setup": "node scripts/telegram-setup.mjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false && tsc -p tsconfig.api.json --pretty false",

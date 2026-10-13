@@ -21,6 +21,7 @@ import {
 import { sendTelegramMessage, sendTelegramOrderNotification } from '../services/telegram.js'
 import { refreshSignedUrls } from '../services/storage.js'
 import { getAdminStats, parseStatsRange } from '../db/stats.js'
+import { notifyClientStatusChange } from '../bot/index.js'
 import { readJsonBody } from '../lib/jsonBody.js'
 import { clientIp, rateLimit } from '../lib/rateLimit.js'
 import type { OrderRecord, OrderStatus } from '../types/order.js'
@@ -190,6 +191,7 @@ adminRoutes.patch('/orders/:id/status', requirePermission('orders.status'), asyn
     const order = await updateOrderStatus(c.req.param('id'), status, body.note || '')
     const history = await getOrderHistory(order.id)
     void syncOrderToSheets(order)
+    await notifyClientStatusChange(order, body.note)
     return c.json({ ok: true, order, history })
   } catch (error) {
     return c.json(
